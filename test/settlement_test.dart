@@ -9,6 +9,7 @@ Room sampleRoom({int karaoke = 30000, String? remainderWinner}) {
     name: '모임',
     ownerMemberId: 'a',
     version: 0,
+    lastActivityAt: DateTime.utc(2026, 11, 8),
     members: const [
       Member(id: 'a', name: 'A'),
       Member(id: 'b', name: 'B'),

@@ -1,5 +1,23 @@
 import 'dart:convert';
 
+/// 정산을 완료하지 않은 방은 마지막 입력 후 이 시간이 지나면 삭제된다.
+const roomInactiveLimit = Duration(hours: 48);
+
+const roomExpiredMessage = '48시간 동안 입력이 없어 삭제된 방입니다.';
+const roomMissingMessage = '방을 찾을 수 없어요. 48시간 동안 입력이 없어 삭제되었을 수 있습니다.';
+const roomExpiryNotice = '정산을 완료하지 않고 48시간 동안 입력이 없으면 방이 삭제됩니다.';
+
+/// 삭제까지 남은 시간을 "1일 3시간", "5시간 20분", "12분" 형태로 보여준다.
+String formatRemaining(Duration remaining) {
+  if (remaining <= Duration.zero) return '곧 삭제';
+  final days = remaining.inDays;
+  final hours = remaining.inHours % 24;
+  final minutes = remaining.inMinutes % 60;
+  if (days > 0) return hours > 0 ? '$days일 $hours시간' : '$days일';
+  if (hours > 0) return minutes > 0 ? '$hours시간 $minutes분' : '$hours시간';
+  return minutes > 0 ? '$minutes분' : '1분 미만';
+}
+
 class Member {
   const Member({required this.id, required this.name, this.actorId});
   final String id;
@@ -114,6 +132,7 @@ class Room {
     required this.members,
     required this.expenses,
     required this.version,
+    required this.lastActivityAt,
     this.sourceRoomId,
   });
   final String id;
@@ -124,6 +143,16 @@ class Room {
   final List<Expense> expenses;
   final int version;
   final String? sourceRoomId;
+
+  /// 마지막 입력(생성·입장·저장·기록 연결) 시각. 조회만으로는 바뀌지 않는다.
+  final DateTime lastActivityAt;
+
+  DateTime get expiresAt => lastActivityAt.add(roomInactiveLimit);
+  bool isExpiredAt(DateTime now) => !now.isBefore(expiresAt);
+  Duration remainingAt(DateTime now) {
+    final left = expiresAt.difference(now);
+    return left.isNegative ? Duration.zero : left;
+  }
 
   int get total => expenses.fold(0, (sum, expense) => sum + expense.total);
   int get pendingRemainder => expenses.fold(
@@ -154,6 +183,7 @@ class Room {
     List<Member>? members,
     List<Expense>? expenses,
     int? version,
+    DateTime? lastActivityAt,
   }) => Room(
     id: id,
     code: code,
@@ -162,6 +192,7 @@ class Room {
     members: members ?? this.members,
     expenses: expenses ?? this.expenses,
     version: version ?? this.version,
+    lastActivityAt: lastActivityAt ?? this.lastActivityAt,
     sourceRoomId: sourceRoomId,
   );
 
@@ -174,8 +205,14 @@ class Room {
     'expenses': expenses.map((expense) => expense.toJson()).toList(),
     'version': version,
     'source_room_id': sourceRoomId,
+    'last_activity_at': lastActivityAt.toUtc().toIso8601String(),
   };
-  factory Room.fromJson(Map<String, dynamic> json) => Room(
+
+  /// [fallbackActivity]는 이 필드가 생기기 전에 저장된 방에 쓰인다.
+  factory Room.fromJson(
+    Map<String, dynamic> json, {
+    DateTime? fallbackActivity,
+  }) => Room(
     id: json['id'] as String,
     code: json['code'] as String,
     name: json['name'] as String,
@@ -192,9 +229,15 @@ class Room {
         )
         .toList(),
     version: (json['version'] as num).toInt(),
+    lastActivityAt: json['last_activity_at'] is String
+        ? DateTime.parse(json['last_activity_at'] as String).toUtc()
+        : (fallbackActivity ?? DateTime.now()).toUtc(),
     sourceRoomId: json['source_room_id'] as String?,
   );
-  static Room decode(String source) =>
-      Room.fromJson(jsonDecode(source) as Map<String, dynamic>);
+  static Room decode(String source, {DateTime? fallbackActivity}) =>
+      Room.fromJson(
+        jsonDecode(source) as Map<String, dynamic>,
+        fallbackActivity: fallbackActivity,
+      );
   String encode() => jsonEncode(toJson());
 }

@@ -23,11 +23,24 @@ abstract class RoomStore {
   Future<Room> linkMember(Room room, String historicalId, String joinedId);
 }
 
+/// 체험 모드 저장소. 서버와 같은 48시간 규칙을 기기 안에서 적용한다.
+///
+/// 기한이 지난 방은 즉시 입장·수정·복제를 막고, 방 목록을 불러올 때 실제로 지운다.
 class LocalRoomStore implements RoomStore {
+  LocalRoomStore({DateTime Function()? clock}) : _clock = clock ?? DateTime.now;
+  final DateTime Function() _clock;
+
+  DateTime get _now => _clock().toUtc();
+
   @override
   bool get isCloud => false;
 
   Future<SharedPreferences> get _prefs => SharedPreferences.getInstance();
+
+  Room _live(Room room) {
+    if (room.isExpiredAt(_now)) throw StateError(roomExpiredMessage);
+    return room;
+  }
 
   @override
   Future<String> actorId() async {
@@ -42,7 +55,24 @@ class LocalRoomStore implements RoomStore {
 
   Future<List<Room>> _all() async {
     final prefs = await _prefs;
-    return (prefs.getStringList('toong_rooms') ?? []).map(Room.decode).toList();
+    final raw = prefs.getStringList('toong_rooms') ?? [];
+    final now = _now;
+    final rooms = raw
+        .map((source) => Room.decode(source, fallbackActivity: now))
+        .toList();
+    // 마지막 입력 시각이 없던 이전 버전의 방은 지금부터 48시간을 센다.
+    if (raw.any((source) => !source.contains('"last_activity_at"'))) {
+      await _write(rooms);
+    }
+    return rooms;
+  }
+
+  /// 기한이 지난 방을 기기에서 지운다.
+  Future<List<Room>> _purgeExpired() async {
+    final rooms = await _all();
+    final live = rooms.where((r) => !r.isExpiredAt(_now)).toList();
+    if (live.length != rooms.length) await _write(live);
+    return live;
   }
 
   Future<void> _write(List<Room> rooms) async {
@@ -56,7 +86,7 @@ class LocalRoomStore implements RoomStore {
   @override
   Future<List<Room>> listRooms() async {
     final actor = await actorId();
-    return (await _all())
+    return (await _purgeExpired())
         .where((r) => r.actorMember(actor) != null)
         .toList()
         .reversed
@@ -85,6 +115,7 @@ class LocalRoomStore implements RoomStore {
       members: [member],
       expenses: [],
       version: 0,
+      lastActivityAt: _now,
     );
     await _write([...rooms, room]);
     return room;
@@ -96,7 +127,7 @@ class LocalRoomStore implements RoomStore {
     final index = rooms.indexWhere((r) => r.code == code.toUpperCase());
     if (index < 0) throw StateError('방 코드를 찾을 수 없습니다.');
     final actor = await actorId();
-    final room = rooms[index];
+    final room = _live(rooms[index]);
     if (room.actorMember(actor) != null) return room;
     final updated = room.copyWith(
       members: [
@@ -104,6 +135,7 @@ class LocalRoomStore implements RoomStore {
         Member(id: newId(), name: nickname, actorId: actor),
       ],
       version: room.version + 1,
+      lastActivityAt: _now,
     );
     rooms[index] = updated;
     await _write(rooms);
@@ -114,16 +146,17 @@ class LocalRoomStore implements RoomStore {
   Future<Room> getRoom(String id) async {
     final actor = await actorId();
     for (final room in await _all()) {
-      if (room.id == id && room.actorMember(actor) != null) return room;
+      if (room.id == id && room.actorMember(actor) != null) return _live(room);
     }
-    throw StateError('참여 중인 방을 찾을 수 없습니다.');
+    throw StateError(roomMissingMessage);
   }
 
   @override
   Future<Room> saveRoom(Room room) async {
     final rooms = await _all();
     final index = rooms.indexWhere((r) => r.id == room.id);
-    if (index < 0) throw StateError('방을 찾을 수 없습니다.');
+    if (index < 0) throw StateError(roomMissingMessage);
+    _live(rooms[index]);
     if (!rooms[index].owns(await actorId())) {
       throw StateError('방장만 지출과 잔돈을 수정할 수 있습니다.');
     }
@@ -134,7 +167,10 @@ class LocalRoomStore implements RoomStore {
         jsonEncode(room.members.map((m) => m.toJson()).toList())) {
       throw StateError('참여자 변경은 별도 절차로 진행해주세요.');
     }
-    final updated = room.copyWith(version: room.version + 1);
+    final updated = room.copyWith(
+      version: room.version + 1,
+      lastActivityAt: _now,
+    );
     rooms[index] = updated;
     await _write(rooms);
     return updated;
@@ -164,6 +200,7 @@ class LocalRoomStore implements RoomStore {
           .map((e) => Expense.fromJson(e.toJson()))
           .toList(),
       version: blank.version,
+      lastActivityAt: blank.lastActivityAt,
       sourceRoomId: current.id,
     );
     final rooms = await _all();
@@ -205,6 +242,7 @@ class LocalRoomStore implements RoomStore {
     final rooms = await _all();
     rooms[rooms.indexWhere((r) => r.id == room.id)] = updated.copyWith(
       version: current.version + 1,
+      lastActivityAt: _now,
     );
     await _write(rooms);
     return rooms.firstWhere((r) => r.id == room.id);
@@ -267,7 +305,13 @@ class CloudRoomStore implements RoomStore {
   @override
   Future<Room> getRoom(String id) async {
     await _signIn();
-    final row = await client.from('rooms').select('data').eq('id', id).single();
+    // 기한이 지난 방은 서버 정책에서 보이지 않는다.
+    final row = await client
+        .from('rooms')
+        .select('data')
+        .eq('id', id)
+        .maybeSingle();
+    if (row == null) throw StateError(roomMissingMessage);
     return _room(row['data']);
   }
 

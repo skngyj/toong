@@ -16,6 +16,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('게스트 이용 안내'), findsOneWidget);
     expect(find.textContaining('기기를 바꾸면'), findsOneWidget);
+    expect(find.textContaining('48시간 동안 입력이 없으면'), findsOneWidget);
     await tester.tap(find.text('확인했어요'));
     await tester.pumpAndSettle();
     expect(find.byType(TextFormField), findsNWidgets(2));
@@ -33,6 +34,13 @@ void main() {
     await tester.tap(find.text('방 만들기'));
     await tester.pumpAndSettle();
     expect(find.text('저녁 모임'), findsOneWidget);
+    expect(find.text('삭제까지 1일 23시간'), findsOneWidget);
+    expect(find.textContaining('48시간 동안 입력이 없으면'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('지출 추가'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.tap(find.text('지출 추가'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).at(0), '음식점');
@@ -47,8 +55,11 @@ void main() {
     await tester.tap(find.text('저장하고 방으로'));
     await tester.pumpAndSettle();
     expect(find.text('10,000원'), findsWidgets);
-    await tester.drag(find.byType(ListView).last, const Offset(0, -260));
-    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('정산 결과 보기'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.tap(find.text('정산 결과 보기'));
     await tester.pumpAndSettle();
     expect(find.text('주고받을 돈이 없어요. 이미 셈셈!'), findsOneWidget);
