@@ -37,12 +37,12 @@ html,body{height:100%;margin:0}
 body{background:var(--paper);color:var(--ink);font:15px/1.55 var(--f-body);-webkit-font-smoothing:antialiased}
 button,input,select{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.app{display:grid;grid-template-rows:auto 1fr;height:100dvh}
+.app{display:grid;grid-template-rows:auto minmax(0,1fr);grid-template-columns:minmax(0,1fr);height:100dvh}
 
 /* 상단 바 */
 .top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-block:12px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));border-bottom:1px solid var(--line);background:var(--card)}
 .logo{width:40px;height:40px;border-radius:12px;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;font:22px var(--f-display)}
-.brand{min-width:0;flex:1}
+.brand{min-width:0;flex:1 1 180px}
 .brand h1{margin:0;font:22px/1.2 var(--f-display);letter-spacing:.01em}
 .brand p{margin:2px 0 0;color:var(--muted);font-size:12.5px}
 .wx-badge{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;background:var(--soft);font-size:13px;white-space:nowrap}
@@ -87,13 +87,14 @@ button,input,select{font:inherit;color:inherit}
 .demo{display:flex;flex-wrap:wrap;gap:6px}
 
 /* 채팅 */
-.chat{display:grid;grid-template-rows:auto minmax(0,1fr) auto auto;min-height:0;background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.chat{display:grid;grid-template-rows:auto minmax(0,1fr) auto auto;grid-template-columns:minmax(0,1fr);min-height:0;background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden}
 .chat-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)}
 .chat-head .av{width:36px;height:36px;border-radius:50%;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;font:17px var(--f-display);position:relative}
 .chat-head .av::after{content:"";position:absolute;right:0;bottom:0;width:9px;height:9px;border-radius:50%;background:var(--basil);border:2px solid var(--card)}
 .chat-head b{display:block}
 .chat-head small{color:var(--muted)}
-.mode{margin-left:auto;font-size:12px;padding:4px 10px;border-radius:999px;background:var(--soft);white-space:nowrap}
+.mode{margin-left:auto;font-size:12px;padding:4px 10px;border-radius:999px;background:var(--soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.chat-head > div{min-width:0}
 .log{overflow-y:auto;padding:18px 16px;display:flex;flex-direction:column;gap:10px;scroll-behavior:smooth}
 .msg{display:flex;gap:8px;align-items:flex-end;max-width:min(600px,90%)}
 .msg .av{flex:0 0 30px;height:30px;border-radius:50%;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;font:14px var(--f-display)}
@@ -166,6 +167,11 @@ button,input,select{font:inherit;color:inherit}
   .panel.open{transform:none;box-shadow:0 0 0 100vmax rgba(0,0,0,.35)}
   .chat{border-radius:0;border:0}
   .brand p{display:none}
+  .logo{display:none}
+  .brand h1{font-size:16px}
+  .top{gap:8px}
+  .top .btn{padding:6px 10px;font-size:13px}
+  .wx-badge{font-size:12px;padding:5px 10px}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 </style>
@@ -350,7 +356,7 @@ function tone(c, f, o = {}) {
   let t = casual ? c : (f ?? c);
   if (o.warm && P.agr >= 55) t = (casual ? o.warm[0] : o.warm[1]) + ' ' + t;
   if (o.extra && P.agr >= 35) t = t + ' ' + (casual ? o.extra[0] : o.extra[1]);
-  if (o.lead && !o.serious && P.ext >= 70) t = pick(casual ? ['오!', '좋아요!', '오케이!'] : ['네,', '알겠습니다.']) + ' ' + t;
+  if (!o.serious && ((o.lead && P.ext >= 70) || P.ext >= 85)) t = pick(casual ? (P.ext >= 85 ? ['와아!', '대박!', '오오!'] : ['오!', '좋아요!', '오케이!']) : ['네,', '알겠습니다.']) + ' ' + t;
   if (o.serious || P.ext < 40) t = t.replace(EMOJI_RE, '');
   else { let n = 0; t = t.replace(EMOJI_RE, m => (++n <= 2 ? m : '')); }
   if (P.ext >= 85 && !o.serious && casual) t = t.replace(/요\./g, '요!');
@@ -375,7 +381,7 @@ function codeToCond(code) {
 async function loadWeather(lat = 37.5665, lon = 126.9780, place = '서울 시청 부근') {
   S.wx = {...S.wx, status:'loading', place};
   renderWeather();
-  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}&current=temperature_2m,weather_code,precipitation&timezone=Asia%2FSeoul`;
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}&current=temperature_2m,weather_code&timezone=Asia%2FSeoul`;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 7000);
   try {
