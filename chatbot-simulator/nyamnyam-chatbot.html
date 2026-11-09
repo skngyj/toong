@@ -1,0 +1,1103 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>냠냠이 배달 챗봇 시뮬레이터</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* 레이아웃: 왼쪽 = 봇 설정·상태 패널, 오른쪽 = 채팅 창. 주문 확인은 주방 주문표(티켓) 모양 */
+:root{
+  --paper:#F3F4EF; --card:#FFFFFF; --soft:#ECEEE7; --ink:#1D2320; --muted:#5D6661; --line:#D8DCD3;
+  --accent:#F2B705; --accent-ink:#1D2320; --accent-soft:#FCEFC2;
+  --chili:#C93A25; --basil:#2E7A4B; --user-bg:#1D2320; --user-ink:#F7F7F2; --ticket:#FFFDF6;
+  --f-display:"Black Han Sans","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-body:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,"Consolas",monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#141816; --card:#1C211E; --soft:#262C28; --ink:#E9ECE6; --muted:#9BA49E; --line:#2E3531;
+    --accent:#F2B705; --accent-ink:#1D2320; --accent-soft:#3A3214;
+    --chili:#FF7A63; --basil:#62C78C; --user-bg:#F2B705; --user-ink:#1D2320; --ticket:#202622;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#141816; --card:#1C211E; --soft:#262C28; --ink:#E9ECE6; --muted:#9BA49E; --line:#2E3531;
+  --accent:#F2B705; --accent-ink:#1D2320; --accent-soft:#3A3214;
+  --chili:#FF7A63; --basil:#62C78C; --user-bg:#F2B705; --user-ink:#1D2320; --ticket:#202622;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--paper);color:var(--ink);font:15px/1.55 var(--f-body);-webkit-font-smoothing:antialiased}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.app{display:grid;grid-template-rows:auto 1fr;height:100dvh}
+
+/* 상단 바 */
+.top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-block:12px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));border-bottom:1px solid var(--line);background:var(--card)}
+.logo{width:40px;height:40px;border-radius:12px;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;font:22px var(--f-display)}
+.brand{min-width:0;flex:1}
+.brand h1{margin:0;font:22px/1.2 var(--f-display);letter-spacing:.01em}
+.brand p{margin:2px 0 0;color:var(--muted);font-size:12.5px}
+.wx-badge{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;background:var(--soft);font-size:13px;white-space:nowrap}
+.btn{border:0;border-radius:10px;padding:8px 14px;cursor:pointer;font-weight:500;background:var(--soft)}
+.btn:hover{filter:brightness(.97)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);font-weight:700}
+.btn.ghost{background:transparent;border:1px solid var(--line)}
+.btn.danger{background:transparent;border:1px solid var(--chili);color:var(--chili)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.only-mobile{display:none}
+
+/* 본문 */
+.layout{display:grid;grid-template-columns:350px minmax(0,1fr);gap:16px;padding:16px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));min-height:0}
+.panel{overflow-y:auto;display:flex;flex-direction:column;gap:12px;min-height:0;padding-bottom:8px}
+.sec{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+.sec h2{margin:0 0 10px;font-size:13px;letter-spacing:.06em;color:var(--muted);font-weight:700}
+.persona{display:flex;gap:12px;align-items:flex-start}
+.persona .av{flex:0 0 44px;height:44px;border-radius:50%;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;font:20px var(--f-display)}
+.persona b{font-size:16px}
+.persona p{margin:2px 0 0;color:var(--muted);font-size:13px}
+.presets{display:flex;flex-wrap:wrap;gap:6px}
+.presets button{border:1px solid var(--line);background:transparent;border-radius:999px;padding:5px 12px;font-size:13px;cursor:pointer}
+.presets button[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.slider{margin-top:12px}
+.slider .row{display:flex;justify-content:space-between;font-size:12.5px;color:var(--muted)}
+.slider .row b{color:var(--ink);font-weight:700}
+.slider .bf{font-size:11.5px;color:var(--muted)}
+.slider input{width:100%;accent-color:var(--accent)}
+.fixed-note{margin-top:12px;font-size:12.5px;color:var(--muted);padding:8px 10px;background:var(--soft);border-radius:8px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:13px;margin:0}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;background:var(--soft);margin:0 4px 4px 0}
+.tag.on{background:var(--accent-soft);color:var(--ink);font-weight:500}
+.tag.intent{background:var(--ink);color:var(--paper)}
+.empty{color:var(--muted)}
+.field{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;font-size:13px}
+.field select{padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--card)}
+.apilog{list-style:none;margin:0;padding:0;font:12px/1.5 var(--f-mono);display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto}
+.apilog li{padding:6px 8px;background:var(--soft);border-radius:6px;overflow-wrap:anywhere}
+.apilog .ok{color:var(--basil)} .apilog .err{color:var(--chili)}
+.demo{display:flex;flex-wrap:wrap;gap:6px}
+
+/* 채팅 */
+.chat{display:grid;grid-template-rows:auto minmax(0,1fr) auto auto;min-height:0;background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.chat-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.chat-head .av{width:36px;height:36px;border-radius:50%;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;font:17px var(--f-display);position:relative}
+.chat-head .av::after{content:"";position:absolute;right:0;bottom:0;width:9px;height:9px;border-radius:50%;background:var(--basil);border:2px solid var(--card)}
+.chat-head b{display:block}
+.chat-head small{color:var(--muted)}
+.mode{margin-left:auto;font-size:12px;padding:4px 10px;border-radius:999px;background:var(--soft);white-space:nowrap}
+.log{overflow-y:auto;padding:18px 16px;display:flex;flex-direction:column;gap:10px;scroll-behavior:smooth}
+.msg{display:flex;gap:8px;align-items:flex-end;max-width:min(600px,90%)}
+.msg .av{flex:0 0 30px;height:30px;border-radius:50%;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;font:14px var(--f-display)}
+.msg.user{align-self:flex-end}
+.msg.agent .av{background:var(--basil);color:#fff;font:600 12px var(--f-body)}
+.bubble{padding:10px 14px;border-radius:16px 16px 16px 4px;background:var(--soft);white-space:pre-wrap;overflow-wrap:anywhere;word-break:keep-all}
+.msg.user .bubble{background:var(--user-bg);color:var(--user-ink);border-radius:16px 16px 4px 16px}
+.msg.agent .bubble{border:1px solid var(--basil);background:transparent}
+.sys{align-self:center;font-size:12.5px;color:var(--muted);background:var(--soft);padding:4px 12px;border-radius:999px;text-align:center}
+.rich{margin-left:38px;max-width:calc(100% - 38px);display:flex;flex-direction:column;gap:8px}
+.inline-btns{display:flex;flex-wrap:wrap;gap:6px}
+.inline-btns .btn{font-size:13.5px;padding:7px 12px;border:1px solid var(--line);background:var(--card)}
+.inline-btns .btn.primary{border-color:var(--accent);background:var(--accent)}
+.typing .bubble{display:flex;gap:4px;padding:14px}
+.typing i{width:6px;height:6px;border-radius:50%;background:var(--muted);animation:blink 1s infinite}
+.typing i:nth-child(2){animation-delay:.15s}.typing i:nth-child(3){animation-delay:.3s}
+@keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
+
+/* 가게 카드 캐러셀 */
+.carousel{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;padding:2px 2px 8px}
+.store{flex:0 0 250px;scroll-snap-align:start;border:1px solid var(--line);border-radius:14px;padding:12px 14px;background:var(--card);display:flex;flex-direction:column;gap:8px}
+.store .hd{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+.store h3{margin:0;font-size:15.5px}
+.store .meta{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.store .why{font-size:12px;background:var(--accent-soft);padding:3px 8px;border-radius:6px;align-self:flex-start}
+.badge{font-size:11px;padding:2px 7px;border-radius:999px;border:1px solid var(--line);white-space:nowrap}
+.badge.new{border-color:var(--basil);color:var(--basil)}
+.menu{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.menu li{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13.5px}
+.menu .price{font-family:var(--f-mono);font-size:12.5px;color:var(--muted)}
+.menu button{border:1px solid var(--line);background:transparent;border-radius:8px;padding:3px 9px;font-size:12.5px;cursor:pointer}
+.menu button:hover{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+
+/* 주문표 티켓 */
+.ticket{max-width:340px;background:var(--ticket);border:1.5px dashed var(--muted);border-radius:6px;padding:14px 16px;font-size:13.5px}
+.ticket .t-head{display:flex;justify-content:space-between;font-weight:700;margin-bottom:8px}
+.ticket .t-head span{font:500 12px var(--f-mono);color:var(--muted)}
+.ticket table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+.ticket td{padding:3px 0}
+.ticket td.n{text-align:right;font-family:var(--f-mono);white-space:nowrap}
+.ticket tr.sum td{border-top:1px dashed var(--muted);padding-top:8px;font-weight:700}
+.ticket tr.disc td{color:var(--basil)}
+.ticket .t-foot{margin-top:10px;display:flex;gap:6px;flex-wrap:wrap}
+
+/* 배달 진행 */
+.prog{max-width:420px;border:1px solid var(--line);border-radius:14px;padding:12px 14px;background:var(--card)}
+.prog .p-head{display:flex;justify-content:space-between;gap:8px;font-size:13px;flex-wrap:wrap}
+.prog .p-head b{font-family:var(--f-mono);font-weight:500}
+.prog .eta{font-weight:700}
+.prog .eta.late{color:var(--chili)}
+.steps{list-style:none;padding:0;margin:12px 0 0;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;font-size:12px;text-align:center}
+.steps li{padding-top:10px;border-top:4px solid var(--line);color:var(--muted)}
+.steps li.done{border-color:var(--accent);color:var(--ink)}
+.steps li.now{border-color:var(--accent);color:var(--ink);font-weight:700}
+.steps li.cancel{border-color:var(--chili);color:var(--chili)}
+.roulette{font:22px var(--f-display);padding:14px 18px;border-radius:14px;background:var(--accent-soft);max-width:300px;text-align:center}
+
+/* 입력 */
+.chips{display:flex;gap:8px;overflow-x:auto;padding:10px 16px;border-top:1px solid var(--line)}
+.chips button{flex:0 0 auto;border:1px solid var(--line);background:var(--card);border-radius:999px;padding:6px 12px;font-size:13px;cursor:pointer}
+.chips button:hover{border-color:var(--accent)}
+.composer{display:flex;gap:8px;padding:10px 16px 14px}
+.composer input{flex:1;min-width:0;border:1px solid var(--line);background:var(--paper);border-radius:12px;padding:11px 14px}
+.composer input:focus{outline:2px solid var(--accent);outline-offset:0}
+
+@media (max-width:880px){
+  .only-mobile{display:inline-block}
+  .layout{grid-template-columns:minmax(0,1fr);padding:0}
+  .panel{position:fixed;top:0;bottom:0;left:0;width:min(370px,92vw);z-index:30;background:var(--paper);padding:16px;padding-left:max(16px,env(safe-area-inset-left,0px));transform:translateX(-105%);transition:transform .25s ease;box-shadow:0 0 0 100vmax rgba(0,0,0,0);}
+  .panel.open{transform:none;box-shadow:0 0 0 100vmax rgba(0,0,0,.35)}
+  .chat{border-radius:0;border:0}
+  .brand p{display:none}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <button class="btn ghost only-mobile" id="panelToggle" aria-controls="panel" aria-expanded="false">설정·상태</button>
+    <div class="logo" aria-hidden="true">냠</div>
+    <div class="brand">
+      <h1>냠냠이 배달 챗봇 시뮬레이터</h1>
+      <p>가상의 음식 배달앱 '한끼배달' · 챗봇 퍼스널리티 설계 실습</p>
+    </div>
+    <span class="wx-badge" id="wxBadge" title="Open-Meteo 날씨 API">날씨 불러오는 중…</span>
+    <button class="btn ghost" id="resetBtn">대화 초기화</button>
+  </header>
+
+  <main class="layout">
+    <aside class="panel" id="panel" aria-label="봇 설정과 상태">
+      <section class="sec">
+        <div class="persona">
+          <div class="av" aria-hidden="true">냠</div>
+          <div>
+            <b>냠냠이 (Nyam-i)</b>
+            <p>배고픈 사람의 메뉴 고민을 대신 해 주는 동네 맛집 친구. 간단한 일은 바로 처리하고, 복잡한 문제는 상담원에게 넘겨요.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="sec">
+        <h2>퍼스널리티 (Big Five → 말투 슬라이더)</h2>
+        <div class="presets" id="presets" role="group" aria-label="프리셋"></div>
+        <div id="sliders"></div>
+        <div class="fixed-note"><b>성실성: 항상 높음 (고정)</b><br>가격·배달비·예상 시간은 항상 숫자로 알려 주고, 주문 전에 반드시 확인해요.</div>
+      </section>
+
+      <section class="sec">
+        <h2>대화 상태 (인텐트 · 슬롯)</h2>
+        <dl class="kv" id="inspector"></dl>
+      </section>
+
+      <section class="sec">
+        <h2>날씨 (외부 API)</h2>
+        <div id="wxInfo" class="empty">불러오는 중…</div>
+        <div class="field">
+          <label for="wxOverride">테스트용 날씨</label>
+          <select id="wxOverride">
+            <option value="auto">실시간 날씨 사용</option>
+            <option value="clear">맑음 · 22°C</option>
+            <option value="rain">비 · 14°C</option>
+            <option value="snow">눈 · -2°C</option>
+            <option value="hot">폭염 · 32°C</option>
+            <option value="cold">한파 · -8°C</option>
+          </select>
+        </div>
+        <div class="field">
+          <button class="btn ghost" id="geoBtn">내 위치 날씨로 바꾸기</button>
+        </div>
+      </section>
+
+      <section class="sec">
+        <h2>시나리오 테스트</h2>
+        <div class="demo">
+          <button class="btn ghost" id="delayBtn" disabled>배달 지연 발생시키기</button>
+        </div>
+        <p class="empty" style="font-size:12.5px;margin:8px 0 0">주문한 뒤 누르면 라이더 지연 상황이 생겨요. 그다음 "왜 안 와요?"라고 물어보세요.</p>
+      </section>
+
+      <section class="sec">
+        <h2>API 호출 기록</h2>
+        <ul class="apilog" id="apiLog"><li class="empty">아직 호출 없음</li></ul>
+      </section>
+    </aside>
+
+    <section class="chat" aria-label="채팅">
+      <div class="chat-head">
+        <div class="av" aria-hidden="true">냠</div>
+        <div><b>냠냠이</b><small>한끼배달 AI 주문 도우미</small></div>
+        <span class="mode" id="modeLabel">다정한 단골집 사장님</span>
+      </div>
+      <div class="log" id="log" aria-live="polite"></div>
+      <div class="chips" id="chips" aria-label="빠른 질문"></div>
+      <form class="composer" id="composer" autocomplete="off">
+        <label for="input" class="sr" style="position:absolute;left:-9999px">메시지</label>
+        <input id="input" placeholder="예: 매운 거 혼자 먹을래 / 짬뽕 2개 시켜줘 / 왜 안 와요?" maxlength="200">
+        <button class="btn primary" type="submit">전송</button>
+      </form>
+    </section>
+  </main>
+</div>
+
+<script>
+"use strict";
+/* =========================================================
+   1. 데이터 (예시 가게·메뉴·쿠폰) — 실제 가게가 아닌 예시 데이터
+   ========================================================= */
+const STORES = [
+  {id:'s1', name:'홍반장 짬뽕', cat:'중식', tastes:['매운','시원'], weather:['rain','cold'], rating:4.8, fee:3000, eta:35, tag:'인기', menus:[['얼큰 짬뽕',9000],['짜장면',7000],['탕수육(소)',15000]]},
+  {id:'s2', name:'비오는날 전집', cat:'한식', tastes:['고소','담백'], weather:['rain'], rating:4.7, fee:3500, eta:40, tag:'신규', menus:[['해물파전',16000],['김치전',12000],['감자전',11000]]},
+  {id:'s3', name:'불꽃 떡볶이', cat:'분식', tastes:['매운','달달'], weather:['any'], rating:4.6, fee:2500, eta:30, tag:'인기', menus:[['로제 떡볶이',14000],['매운 떡볶이',13000],['모둠 튀김',6000]]},
+  {id:'s4', name:'바삭 치킨클럽', cat:'치킨', tastes:['고소','느끼'], weather:['any','hot'], rating:4.7, fee:3000, eta:45, tag:'인기', menus:[['후라이드',19000],['양념치킨',20000],['반반치킨',20000]]},
+  {id:'s5', name:'할매 순대국', cat:'한식', tastes:['담백','시원'], weather:['cold','rain','snow'], rating:4.8, fee:2000, eta:30, tag:'인기', menus:[['순대국밥',9500],['모둠순대',13000]]},
+  {id:'s6', name:'얼음골 냉면', cat:'한식', tastes:['시원','새콤'], weather:['hot'], rating:4.5, fee:3000, eta:35, tag:'', menus:[['물냉면',10000],['비빔냉면',10500],['고기만두',6000]]},
+  {id:'s7', name:'도쿄 스시바', cat:'일식', tastes:['담백'], weather:['hot','clear'], rating:4.6, fee:4000, eta:45, tag:'신규', menus:[['모둠초밥 12p',17000],['연어덮밥',13000]]},
+  {id:'s8', name:'화덕 피자공방', cat:'피자', tastes:['느끼','고소'], weather:['any'], rating:4.4, fee:3000, eta:50, tag:'', menus:[['마르게리타',18000],['페퍼로니',20000]]},
+  {id:'s9', name:'더블패티 버거', cat:'버거', tastes:['느끼','고소'], weather:['any','clear'], rating:4.5, fee:2500, eta:30, tag:'', menus:[['치즈버거 세트',9500],['베이컨 더블 세트',12500]]},
+  {id:'s10', name:'마라 연구소', cat:'중식', tastes:['매운'], weather:['cold','snow'], rating:4.6, fee:3000, eta:40, tag:'신규', menus:[['마라탕(1인)',11000],['마라샹궈',18000]]},
+  {id:'s11', name:'몽글 디저트', cat:'디저트', tastes:['달달'], weather:['hot','clear'], rating:4.7, fee:3000, eta:30, tag:'', menus:[['우유빙수',12000],['크로플 세트',8000]]},
+  {id:'s12', name:'샐러드 정원', cat:'샐러드', tastes:['담백','새콤'], weather:['hot','clear'], rating:4.5, fee:2000, eta:25, tag:'신규', menus:[['닭가슴살 샐러드',9900],['연어 포케',11900]]},
+  {id:'s13', name:'뜨끈 부대찌개', cat:'한식', tastes:['매운','시원'], weather:['cold','snow','rain'], rating:4.6, fee:3000, eta:40, tag:'인기', menus:[['부대찌개(2인)',22000],['라면사리',1500]]}
+];
+const CAT_WORDS = {
+  '치킨':['치킨','통닭','후라이드','양념'], '피자':['피자'], '중식':['중식','중국','짜장','짬뽕','탕수육','마라'],
+  '한식':['한식','국밥','찌개','냉면','파전','부침개','순대','백반'], '일식':['일식','초밥','스시','덮밥'],
+  '분식':['분식','떡볶이','떡볶','튀김','김밥'], '버거':['버거','햄버거'], '디저트':['디저트','빙수','크로플','케이크'],
+  '샐러드':['샐러드','다이어트','포케']
+};
+const TASTE_WORDS = {
+  '매운':['매운','매콤','얼큰','맵','칼칼'], '달달':['달달','달콤','단거','단 거','당 떨어'], '담백':['담백','깔끔','슴슴','가벼운'],
+  '느끼':['느끼','기름진','치즈','꾸덕'], '시원':['시원','국물','뜨끈','따끈','해장'], '고소':['고소','바삭'], '새콤':['새콤','상큼']
+};
+const COUPONS = [
+  {id:'c1', name:'첫 주문 할인', amount:3000, min:15000},
+  {id:'c2', name:'비 오는 날 할인', amount:1000, min:10000, cond:'rain'}
+];
+const PAST_ORDER = {id:'D1108-0417', storeId:'s4', items:[{name:'후라이드',price:19000,qty:1}], note:'어제 주문 (예시 내역)'};
+const STAGES = ['주문 접수','조리 중','배달 중','배달 완료'];
+const STAGE_AT = [0, 7000, 15000, 26000];   // 시연용: 실제 30~50분을 약 26초로 압축
+const DEMO_MS = 26000;
+
+const PRESETS = [
+  {id:'kind', name:'다정한 단골집 사장님', p:{ext:75, agr:80, opn:50, cas:60}},
+  {id:'hype', name:'텐션 높은 먹방 친구', p:{ext:95, agr:65, opn:90, cas:95}},
+  {id:'cs',   name:'깔끔한 고객센터',     p:{ext:20, agr:45, opn:25, cas:10}}
+];
+const SLIDERS = [
+  {k:'ext', bf:'외향성', l:'차분한', r:'활기찬'},
+  {k:'agr', bf:'친화성', l:'사무적', r:'다정한'},
+  {k:'opn', bf:'개방성', l:'무난한 추천', r:'모험적 추천'},
+  {k:'cas', bf:'예민성(낮음)', l:'공식적', r:'캐주얼'}
+];
+const INTENT_LABEL = {
+  recommend:'메뉴 추천', order:'주문하기(메뉴 담기)', checkout:'주문 확인', track:'배달 조회', late:'배달 지연 불만',
+  issue:'문제 접수', cancel:'취소·환불', coupon:'쿠폰 조회', whoami:'트롤링: 정체 질문', insult:'부정 반응: 비난',
+  offtopic:'트롤링: 엉뚱한 요청', allergy:'알레르기 문의', indecisive:'결정 장애(룰렛)', counselor:'상담원 연결',
+  greet:'인사', thanks:'감사', help:'도움말', fallback:'이해 실패', confirm:'확인 응답', persona:'말투 변경'
+};
+
+/* =========================================================
+   2. 상태
+   ========================================================= */
+const S = {
+  p:{...PRESETS[0].p}, preset:'kind',
+  intent:null, slots:{taste:null, category:null, people:null, budget:null}, slotsUsed:false,
+  awaiting:null, misses:0,
+  wx:{status:'loading', temp:null, code:null, cond:null, place:'서울 시청 부근', time:null},
+  override:'auto',
+  cart:[], cartStore:null, coupons:COUPONS.map(c=>({...c, used:false})),
+  order:null, issue:null, apiLog:[], pendingMatches:null
+};
+
+/* =========================================================
+   3. 유틸
+   ========================================================= */
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const won = n => n.toLocaleString('ko-KR') + '원';
+const store = id => STORES.find(s => s.id === id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const EMOJI_RE = /\p{Extended_Pictographic}️?/gu;
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* 퍼스널리티에 맞춰 문장을 다듬는 함수
+   c = 캐주얼(해요체) 문장, f = 공식(합니다체) 문장
+   o.serious: 지연·문제 상황 → 이모지·감탄사 제거
+   o.warm:   친화성이 높을 때 앞에 붙는 공감 문장 [캐주얼, 공식]
+   o.extra:  친화성이 아주 낮지 않을 때 뒤에 붙는 친절한 덧말 [캐주얼, 공식]
+   o.lead:   외향성이 높을 때 앞에 감탄사 */
+function tone(c, f, o = {}) {
+  const P = S.p, casual = P.cas >= 50;
+  let t = casual ? c : (f ?? c);
+  if (o.warm && P.agr >= 55) t = (casual ? o.warm[0] : o.warm[1]) + ' ' + t;
+  if (o.extra && P.agr >= 35) t = t + ' ' + (casual ? o.extra[0] : o.extra[1]);
+  if (o.lead && !o.serious && P.ext >= 70) t = pick(casual ? ['오!', '좋아요!', '오케이!'] : ['네,', '알겠습니다.']) + ' ' + t;
+  if (o.serious || P.ext < 40) t = t.replace(EMOJI_RE, '');
+  else { let n = 0; t = t.replace(EMOJI_RE, m => (++n <= 2 ? m : '')); }
+  if (P.ext >= 85 && !o.serious && casual) t = t.replace(/요\./g, '요!');
+  return t.replace(/[ \t]{2,}/g, ' ').replace(/ \n/g, '\n').trim();
+}
+
+/* =========================================================
+   4. 외부 API: Open-Meteo 날씨 (키 없음)
+   https://open-meteo.com/en/docs
+   ========================================================= */
+function logApi(ok, text) {
+  const t = new Date().toLocaleTimeString('ko-KR', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  S.apiLog.unshift({ok, text, t});
+  renderApiLog();
+}
+function codeToCond(code) {
+  if (code === 0 || code === 1) return 'clear';
+  if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82) || code >= 95) return 'rain';
+  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return 'snow';
+  return 'cloudy';
+}
+async function loadWeather(lat = 37.5665, lon = 126.9780, place = '서울 시청 부근') {
+  S.wx = {...S.wx, status:'loading', place};
+  renderWeather();
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}&current=temperature_2m,weather_code,precipitation&timezone=Asia%2FSeoul`;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 7000);
+  try {
+    const res = await fetch(url, {signal: ctrl.signal});
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const j = await res.json();
+    const c = j.current;
+    S.wx = {status:'ok', temp:c.temperature_2m, code:c.weather_code, cond:codeToCond(c.weather_code), place, time:c.time};
+    logApi(true, `GET api.open-meteo.com/v1/forecast → 200 · ${c.temperature_2m}°C, 코드 ${c.weather_code}`);
+  } catch (e) {
+    S.wx = {...S.wx, status:'error'};
+    logApi(false, `GET api.open-meteo.com/v1/forecast → 실패 (${e.name === 'AbortError' ? '시간 초과' : e.message})`);
+  } finally { clearTimeout(timer); }
+  renderWeather(); renderInspector();
+}
+/* 추천에 쓰는 '현재 날씨' (테스트용 선택값이 있으면 그것을 우선) */
+const OVERRIDES = {clear:{cond:'clear', temp:22}, rain:{cond:'rain', temp:14}, snow:{cond:'snow', temp:-2}, hot:{cond:'clear', temp:32}, cold:{cond:'clear', temp:-8}};
+function currentWx() {
+  let cond, temp, source;
+  if (S.override !== 'auto') { ({cond, temp} = OVERRIDES[S.override]); source = '테스트값'; }
+  else if (S.wx.status === 'ok') { ({cond, temp} = S.wx); source = 'Open-Meteo'; }
+  else return null;
+  const tags = [cond];
+  if (temp >= 27) tags.push('hot');
+  if (temp <= 5) tags.push('cold');
+  const label = {clear:'맑음', cloudy:'흐림', rain:'비', snow:'눈'}[cond];
+  const icon = {clear:'☀️', cloudy:'☁️', rain:'☔', snow:'❄️'}[cond];
+  return {cond, temp, tags, label, icon, source};
+}
+function wxSentence(w) {
+  if (!w) return null;
+  if (w.tags.includes('rain')) return ['비 오는 날엔 역시 전이나 얼큰한 국물이죠 ☔', '비가 오는 날에는 전이나 국물 요리를 많이 찾으십니다.'];
+  if (w.tags.includes('snow')) return ['눈 오는 날엔 뜨끈한 게 최고예요 ❄️', '눈이 오는 날에는 따뜻한 국물 요리를 추천드립니다.'];
+  if (w.tags.includes('cold')) return [`오늘 ${Math.round(w.temp)}°C라 꽤 추워요. 뜨끈한 거 어때요? 🍲`, `현재 기온이 ${Math.round(w.temp)}°C로 낮아 따뜻한 메뉴를 추천드립니다.`];
+  if (w.tags.includes('hot')) return [`오늘 ${Math.round(w.temp)}°C라 덥네요. 시원한 거 어때요? 🧊`, `현재 기온이 ${Math.round(w.temp)}°C로 높아 시원한 메뉴를 추천드립니다.`];
+  return [`오늘은 ${w.label}, ${Math.round(w.temp)}°C예요. 뭐든 맛있을 날씨네요 😋`, `현재 날씨는 ${w.label}, ${Math.round(w.temp)}°C입니다.`];
+}
+
+/* =========================================================
+   5. 화면 렌더링 (패널)
+   ========================================================= */
+function renderPresets() {
+  $('#presets').innerHTML = PRESETS.map(p => `<button type="button" data-preset="${p.id}" aria-pressed="${S.preset === p.id}">${esc(p.name)}</button>`).join('');
+  const cur = PRESETS.find(p => p.id === S.preset);
+  $('#modeLabel').textContent = cur ? cur.name : '사용자 지정 말투';
+}
+function renderSliders() {
+  $('#sliders').innerHTML = SLIDERS.map(s => `
+    <div class="slider">
+      <div class="row"><span>${s.l}</span><b id="v-${s.k}">${S.p[s.k]}%</b><span>${s.r}</span></div>
+      <input type="range" min="0" max="100" step="5" id="sl-${s.k}" value="${S.p[s.k]}" aria-label="${s.bf}: ${s.l}에서 ${s.r}">
+      <div class="bf">${s.bf}</div>
+    </div>`).join('');
+}
+function renderInspector() {
+  const sl = S.slots, w = currentWx();
+  const slot = (k, label, v) => `<span class="tag ${v ? 'on' : ''}">${label}: ${v ? esc(v) : '—'}</span>`;
+  const cartTxt = S.cart.length ? `${esc(store(S.cartStore).name)} · ${S.cart.map(i => `${esc(i.name)}×${i.qty}`).join(', ')}` : '<span class="empty">비어 있음</span>';
+  let orderTxt = '<span class="empty">없음</span>';
+  if (S.order) orderTxt = `${S.order.id} · ${S.order.cancelled ? '취소됨' : STAGES[S.order.stage]}${S.order.delayed ? ' (지연)' : ''}`;
+  $('#inspector').innerHTML = `
+    <dt>인텐트</dt><dd>${S.intent ? `<span class="tag intent">${esc(INTENT_LABEL[S.intent] || S.intent)}</span>` : '<span class="empty">—</span>'}</dd>
+    <dt>슬롯</dt><dd>${slot('taste', '맛', sl.taste)}${slot('category', '종류', sl.category)}${slot('people', '인원', sl.people ? sl.people + '명' : null)}${slot('budget', '예산', sl.budget ? won(sl.budget) : null)}${slot('wx', '날씨', w ? `${w.label} ${Math.round(w.temp)}°C` : null)}</dd>
+    <dt>기다리는 답</dt><dd>${S.awaiting ? esc({taste:'맛·종류', people:'인원', confirmOrder:'주문 확정', cancelConfirm:'취소 확정', issueType:'문제 유형', issuePhoto:'사진', issueResolve:'해결 방법', menuPick:'메뉴 선택'}[S.awaiting] || S.awaiting) : '<span class="empty">—</span>'}</dd>
+    <dt>이해 실패</dt><dd>${S.misses}회 ${S.misses >= 2 ? '→ 상담원 연결 제안' : ''}</dd>
+    <dt>장바구니</dt><dd>${cartTxt}</dd>
+    <dt>주문</dt><dd>${orderTxt}</dd>`;
+  $('#delayBtn').disabled = !(S.order && !S.order.cancelled && S.order.stage < 3 && !S.order.delayed);
+}
+function renderWeather() {
+  const w = S.wx, b = $('#wxBadge'), info = $('#wxInfo');
+  const cw = currentWx();
+  if (S.override !== 'auto') b.textContent = `${cw.icon} ${cw.label} ${cw.temp}°C (테스트)`;
+  else if (w.status === 'loading') b.textContent = '날씨 불러오는 중…';
+  else if (w.status === 'error') b.textContent = '날씨 정보 없음';
+  else b.textContent = `${cw.icon} ${cw.label} ${Math.round(w.temp)}°C`;
+  if (w.status === 'loading') info.innerHTML = '<span class="empty">Open-Meteo에서 불러오는 중…</span>';
+  else if (w.status === 'error') info.innerHTML = '<span style="color:var(--chili)">날씨 정보를 불러오지 못했어요. 인터넷 연결을 확인하거나 아래 테스트용 날씨를 고르세요. 날씨 없이도 추천은 돼요.</span>';
+  else {
+    const label = {clear:'맑음', cloudy:'흐림', rain:'비', snow:'눈'}[w.cond];
+    info.innerHTML = `<dl class="kv"><dt>위치</dt><dd>${esc(w.place)}</dd><dt>실시간</dt><dd>${label}, ${w.temp}°C (코드 ${w.code})</dd><dt>기준 시각</dt><dd>${esc((w.time || '').replace('T', ' '))}</dd><dt>출처</dt><dd><a href="https://open-meteo.com/" target="_blank" rel="noopener" style="color:inherit">Open-Meteo</a></dd></dl>`;
+  }
+}
+function renderApiLog() {
+  $('#apiLog').innerHTML = S.apiLog.slice(0, 12).map(l => `<li><span class="${l.ok ? 'ok' : 'err'}">${l.ok ? '성공' : '실패'}</span> ${l.t}<br>${esc(l.text)}</li>`).join('') || '<li class="empty">아직 호출 없음</li>';
+}
+
+/* =========================================================
+   6. 채팅 출력
+   ========================================================= */
+const log = $('#log');
+function scrollDown() { log.scrollTop = log.scrollHeight; }
+function maskPrivate(t) {
+  return t.replace(/(01[016789])[-\s]?(\d{3,4})[-\s]?(\d{4})/g, '$1-****-$3');
+}
+function addUser(text) {
+  const masked = maskPrivate(text);
+  log.insertAdjacentHTML('beforeend', `<div class="msg user"><div class="bubble">${esc(masked)}</div></div>`);
+  scrollDown();
+  return masked !== text;
+}
+async function bot(text, opts = {}) {
+  const t = document.createElement('div');
+  t.className = 'msg typing';
+  t.innerHTML = '<div class="av" aria-hidden="true">냠</div><div class="bubble" aria-label="입력 중"><i></i><i></i><i></i></div>';
+  log.appendChild(t); scrollDown();
+  await sleep(reduceMotion ? 0 : Math.min(900, 300 + text.length * 8));
+  t.remove();
+  log.insertAdjacentHTML('beforeend', `<div class="msg ${opts.agent ? 'agent' : ''}"><div class="av" aria-hidden="true">${opts.agent ? '상담' : '냠'}</div><div class="bubble">${esc(text)}</div></div>`);
+  scrollDown();
+}
+function rich(html) {
+  const d = document.createElement('div');
+  d.className = 'rich';
+  d.innerHTML = html;
+  log.appendChild(d); scrollDown();
+  return d;
+}
+function sys(text) {
+  log.insertAdjacentHTML('beforeend', `<div class="sys">${esc(text)}</div>`);
+  scrollDown();
+}
+const btns = list => `<div class="inline-btns">${list.map(b => `<button type="button" class="btn ${b.primary ? 'primary' : ''}" ${Object.entries(b.data).map(([k, v]) => `data-${k}="${esc(v)}"`).join(' ')}>${esc(b.label)}</button>`).join('')}</div>`;
+const sendBtn = (label, text, primary) => ({label, primary, data:{act:'send', text: text || label}});
+
+/* =========================================================
+   7. 자연어 이해 (규칙·키워드 기반)
+   ========================================================= */
+function extractSlots(t) {
+  const n = t.replace(/\s+/g, '');
+  const found = {};
+  for (const [cat, ws] of Object.entries(CAT_WORDS)) if (ws.some(w => n.includes(w.replace(/\s/g, '')))) { found.category = cat; break; }
+  for (const [ta, ws] of Object.entries(TASTE_WORDS)) if (ws.some(w => n.includes(w.replace(/\s/g, '')))) { found.taste = ta; break; }
+  let m;
+  if ((m = t.match(/(\d+)\s*(명|인분|인)/))) found.people = Math.min(10, +m[1]);
+  else if (/혼자|혼밥|나\s*혼자|1인/.test(t)) found.people = 1;
+  else if (/둘이|두\s*명|2인/.test(t)) found.people = 2;
+  else if (/셋이|세\s*명|3\s*~\s*4|3~4/.test(t)) found.people = 3;
+  else if (/넷이|네\s*명|가족/.test(t)) found.people = 4;
+  else if (/상관\s*없|아무나|모르겠어요\s*인원/.test(t) && S.awaiting === 'people') found.people = 1;
+  if ((m = t.match(/(\d+)\s*만\s*원?/))) found.budget = +m[1] * 10000;
+  else if ((m = t.match(/(\d{4,6})\s*원/))) found.budget = +m[1];
+  else if (/저렴|싸게|가성비|싼\s*거/.test(t)) found.budget = 12000;
+  return found;
+}
+/* 메뉴 이름 찾기: "짬뽕 2개 시켜줘" → 얼큰 짬뽕 */
+const GENERIC = ['세트', '모둠', '1인', '2인', '12p', '매운', '얼큰', '더블'];
+function findMenus(t) {
+  const n = t.replace(/\s+/g, '');
+  const hits = [];
+  for (const s of STORES) s.menus.forEach(([name, price], i) => {
+    const clean = name.replace(/\(.*?\)/g, '');
+    const keys = [clean.replace(/\s/g, ''), ...clean.split(' ').filter(w => w.length >= 2 && !GENERIC.includes(w))];
+    if (keys.some(k => n.includes(k))) hits.push({storeId:s.id, idx:i, name, price, exact: n.includes(clean.replace(/\s/g, ''))});
+  });
+  const exact = hits.filter(h => h.exact);
+  return exact.length ? exact : hits;
+}
+function parseQty(t) {
+  const m = t.match(/(\d+)\s*(개|그릇|마리|판|인분|세트|접시)/);
+  if (m) return Math.max(1, Math.min(20, +m[1]));
+  const k = t.match(/(한|두|세|네|다섯)\s*(개|그릇|마리|판|세트|접시)/);
+  if (k) return {'한':1, '두':2, '세':3, '네':4, '다섯':5}[k[1]];
+  return 1;
+}
+const YES = /^(네|넹|넵|응|어|예|ㅇㅇ|좋아|좋아요|그래|오케이|ok|웅|yes|주문(해|할게|하기|해줘|해주세요)?|확인)/i;
+const NO = /(아니|ㄴㄴ|싫어|그만|나중|안\s*할|됐어|괜찮아요|그대로)/;
+
+function detect(t) {
+  const n = t.replace(/\s+/g, '');
+  if (/(말투|성격|프리셋)/.test(t)) return 'persona';
+  if (/(ai|에이아이|인공지능|로봇|봇이야|봇이에요|사람이야|사람이에요|사람\s*맞)/i.test(t)) return 'whoami';
+  if (/(안\s*와|안와|안\s*오|안오|늦어|늦게|늦네|지연|한참|오래\s*걸|아직도|왜\s*이렇게\s*느)/.test(t)) return 'late';
+  if (/(멍청|바보|병신|쓰레기|쓸모\s*없|꺼져|닥쳐|짜증나게|최악)/.test(t)) return 'insult';
+  if (/(다르게\s*왔|잘못\s*왔|다른\s*메뉴|빠졌|빠져\s*있|누락|식었|차가워|이물|쏟아|흘러|흘렀|상했|이상해|문제가\s*생|문제\s*있)/.test(t)) return 'issue';
+  if (/(취소|환불)/.test(t)) return 'cancel';
+  if (/(상담원|상담사|사람이랑|사람\s*연결|직원|고객센터)/.test(t)) return 'counselor';
+  if (/(어디쯤|어디야|어디에요|어디예요|배달\s*현황|주문\s*조회|조회|언제\s*(와|도착|오)|얼마나\s*걸|도착)/.test(t) || /내주문/.test(n)) return 'track';
+  if (/(알레르기|알러지|땅콩|갑각류|글루텐|유당)/.test(t)) return 'allergy';
+  if (/(쿠폰|할인|이벤트)/.test(t)) return 'coupon';
+  if (/(숙제|과제|레포트|리포트|코딩|주식|로또|연애|노래\s*불러|게임\s*하|번역)/.test(t)) return 'offtopic';
+  if (/(아무거나|아무\s*거나|몰라|모르겠|골라\s*줘|골라줘|랜덤|룰렛|결정\s*못|정해\s*줘)/.test(t)) return 'indecisive';
+  if (/(시켜|주문|담아|주세요|할게|줘|먹을래|추가)/.test(t) && !/(추천|골라|뭐)/.test(t) && findMenus(t).length) return 'order';
+  if (/(장바구니|결제|주문할게|주문하기|계산)/.test(t)) return 'checkout';
+  if (/(날씨|비\s*오|비와|비가|눈\s*오|눈와|추워|추운|더워|더운)/.test(t)) return 'weather';
+  if (/(뭐\s*먹|추천|배고|배고파|메뉴|먹고\s*싶|땡기|땡겨|당기|당겨|야식|점심|저녁|아침|출출)/.test(t)) return 'recommend';
+  if (/^(안녕|하이|hi|hello|ㅎㅇ|반가)/i.test(t)) return 'greet';
+  if (/(고마|감사|땡큐|thanks|최고)/i.test(t)) return 'thanks';
+  if (/(뭐\s*할\s*수|기능|도움말|도와|사용법|help)/i.test(t)) return 'help';
+  return null;
+}
+
+/* =========================================================
+   8. 대화 처리
+   ========================================================= */
+let busy = false;
+async function handleUser(text) {
+  const t = text.trim();
+  if (!t || busy) return;
+  busy = true;
+  try {
+    const masked = addUser(t);
+    if (masked) sys('개인정보 보호를 위해 전화번호는 가려서 표시했어요');
+    await route(t);
+  } finally {
+    busy = false;
+    renderInspector();
+  }
+}
+
+async function route(t) {
+  const found = extractSlots(t);
+
+  // (1) 바로 앞 질문에 대한 답 처리
+  if (S.awaiting === 'confirmOrder') {
+    if (NO.test(t) || /취소/.test(t)) { S.awaiting = null; S.intent = 'confirm'; return bot(tone('네, 주문은 잠시 보류할게요. 장바구니는 그대로 있어요.', '주문을 보류했습니다. 장바구니는 유지됩니다.')); }
+    if (YES.test(t)) { S.intent = 'confirm'; return placeOrder(); }
+  }
+  if (S.awaiting === 'cancelConfirm') {
+    if (NO.test(t)) { S.awaiting = null; S.intent = 'confirm'; return bot(tone('네, 주문은 그대로 진행할게요 🛵', '주문을 그대로 진행합니다.')); }
+    if (YES.test(t) || /취소/.test(t)) { S.intent = 'confirm'; return doCancel(); }
+  }
+
+  let intent = detect(t);
+  if (!intent && (S.awaiting === 'taste' || S.awaiting === 'people') && (found.taste || found.category || found.people || found.budget)) intent = 'recommend';
+  if (!intent && (found.taste || found.category)) intent = 'recommend';
+  if (!intent && findMenus(t).length && S.awaiting !== 'taste') intent = 'order';
+
+  S.intent = intent || 'fallback';
+  if (intent) S.misses = 0;
+
+  switch (intent) {
+    case 'recommend': return doRecommend(found, false);
+    case 'weather':   return doRecommend(found, true);
+    case 'order':     return doOrderFromText(t);
+    case 'checkout':  return showCheckout();
+    case 'track':     return doTrack();
+    case 'late':      return doLate();
+    case 'issue':     return startIssue(t);
+    case 'cancel':    return startCancel();
+    case 'coupon':    return doCoupon();
+    case 'whoami':    return doWhoami();
+    case 'insult':    return doInsult();
+    case 'offtopic':  return doOfftopic();
+    case 'allergy':   return doAllergy();
+    case 'indecisive':return doRoulette();
+    case 'counselor': return doCounselor('직접 요청');
+    case 'greet':     return bot(tone('안녕하세요! 오늘 뭐 드시고 싶으세요? 😋', '안녕하세요. 무엇을 도와드릴까요?', {lead:true}));
+    case 'thanks':    return bot(tone('천만에요! 맛있게 드세요 🍽️', '감사합니다. 맛있게 드십시오.'));
+    case 'help':      return doHelp();
+    case 'persona':   return bot(tone('말투는 왼쪽 패널에서 바꿀 수 있어요! 프리셋을 눌러 보세요 😊', '말투는 왼쪽 패널의 슬라이더와 프리셋으로 변경하실 수 있습니다.'));
+    default:          return doFallback();
+  }
+}
+
+/* --- 메뉴 추천 (슬롯 채우기) --- */
+async function doRecommend(found, fromWeather) {
+  // 지난 추천이 끝났으면 새 추천을 위해 슬롯을 비움
+  if (S.slotsUsed) {
+    S.slots = {taste:null, category:null, people:null, budget:null};
+    S.wxMode = false;
+  }
+  S.slotsUsed = false;
+  if (fromWeather) S.wxMode = true;
+  fromWeather = !!S.wxMode;
+  for (const k of ['taste', 'category', 'people', 'budget']) if (found[k] != null) S.slots[k] = found[k];
+  const sl = S.slots;
+
+  // 필수 슬롯: 맛 또는 종류 (날씨로 물어본 경우 날씨가 대신함)
+  if (!sl.taste && !sl.category && !fromWeather) {
+    S.awaiting = 'taste';
+    await bot(tone('좋아요, 같이 골라 봐요! 어떤 게 땡기세요? 🤔', '추천을 위해 원하시는 맛이나 음식 종류를 알려 주세요.', {lead:true}));
+    rich(btns([sendBtn('🌶️ 매콤한 거', '매운 거'), sendBtn('🍲 국물', '국물 있는 거'), sendBtn('🍗 치킨'), sendBtn('🍰 달달한 거', '달달한 거'), sendBtn('🎲 아무거나')]));
+    return;
+  }
+  // 선택 슬롯: 인원 (한 번만 물어봄)
+  if (!sl.people && S.awaiting !== 'people') {
+    S.awaiting = 'people';
+    await bot(tone('몇 분이서 드실 건가요?', '몇 분이 드실 예정인가요?'));
+    rich(btns([sendBtn('혼자요'), sendBtn('2명'), sendBtn('3~4명', '4명'), sendBtn('상관없어요')]));
+    return;
+  }
+  S.awaiting = null;
+  if (!sl.people) sl.people = 1;
+  await presentRecs(fromWeather);
+}
+
+function scoreStores() {
+  const sl = S.slots, w = currentWx(), o = S.p.opn / 100;
+  let list = STORES.slice();
+  if (sl.category) list = list.filter(s => s.cat === sl.category);
+  if (sl.taste) {
+    const tasty = list.filter(s => s.tastes.includes(sl.taste));
+    if (tasty.length) list = tasty;
+  }
+  const scored = list.map(s => {
+    let score = s.rating;
+    const why = [];
+    if (w && s.weather.some(x => w.tags.includes(x))) { score += 2; why.push(`${w.icon} ${w.label}${w.tags.includes('hot') ? '·더위' : w.tags.includes('cold') ? '·추위' : ''}에 어울려요`); }
+    if (s.tag === '신규') score += 2 * o;
+    if (s.tag === '인기') score += 2 * (1 - o);
+    const minPrice = Math.min(...s.menus.map(m => m[1]));
+    if (sl.budget && minPrice * Math.max(1, Math.ceil(sl.people / 2)) + s.fee > sl.budget) score -= 5;
+    if (sl.people >= 3 && s.menus.some(m => m[1] >= 15000)) score += 0.5;
+    return {s, score, why};
+  });
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, 3);
+}
+async function presentRecs(fromWeather) {
+  const sl = S.slots, w = currentWx(), recs = scoreStores();
+  S.slotsUsed = true;
+  const ws = wxSentence(w);
+  if (fromWeather && !w) await bot(tone('지금 날씨 정보를 불러오지 못했어요. 대신 인기 메뉴로 골라 볼게요.', '날씨 정보를 불러오지 못해 인기 메뉴 기준으로 추천드립니다.'));
+  else if (ws) await bot(tone(ws[0], ws[1]));
+  const parts = [sl.taste && `${sl.taste}맛`, sl.category, `${sl.people}명`, sl.budget && `${won(sl.budget)} 이하`].filter(Boolean).join(', ');
+  const adv = S.p.opn >= 70 ? ['새로 생긴 가게도 섞어 봤어요 ✨', '신규 가게를 포함했습니다.'] : S.p.opn <= 30 ? ['실패 없는 인기 가게 위주로 골랐어요.', '검증된 인기 가게 위주로 선정했습니다.'] : null;
+  await bot(tone(`${parts} 기준으로 이 세 곳 어때요? 👇`, `${parts} 조건으로 3곳을 추천드립니다.`, {extra: adv || undefined}));
+  rich(`<div class="carousel">${recs.map(r => storeCard(r.s, r.why)).join('')}</div>`);
+}
+function storeCard(s, why = []) {
+  return `<article class="store">
+    <div class="hd"><h3>${esc(s.name)}</h3>${s.tag ? `<span class="badge ${s.tag === '신규' ? 'new' : ''}">${s.tag}</span>` : ''}</div>
+    <div class="meta">★ ${s.rating} · ${esc(s.cat)} · 배달비 ${won(s.fee)} · 약 ${s.eta}분</div>
+    ${why.map(x => `<span class="why">${esc(x)}</span>`).join('')}
+    <ul class="menu">${s.menus.map(([n, p], i) => `<li><span>${esc(n)} <span class="price">${won(p)}</span></span><button type="button" data-act="add" data-store="${s.id}" data-idx="${i}" aria-label="${esc(n)} 담기">담기</button></li>`).join('')}</ul>
+  </article>`;
+}
+
+/* --- 장바구니·주문 --- */
+async function addToCart(storeId, idx, qty = 1) {
+  const s = store(storeId), [name, price] = s.menus[idx];
+  if (S.cartStore && S.cartStore !== storeId && S.cart.length) {
+    await bot(tone(`장바구니엔 한 가게 메뉴만 담을 수 있어서, ${store(S.cartStore).name} 메뉴는 비우고 새로 담았어요.`, `장바구니에는 한 가게의 메뉴만 담을 수 있어 기존 ${store(S.cartStore).name} 메뉴를 비웠습니다.`));
+    S.cart = [];
+  }
+  S.cartStore = storeId;
+  const ex = S.cart.find(i => i.name === name);
+  if (ex) ex.qty += qty; else S.cart.push({name, price, qty});
+  S.intent = 'order';
+  await bot(tone(`${name} ${qty}개 담았어요! 🛒`, `${name} ${qty}개를 장바구니에 담았습니다.`, {lead: qty > 1}));
+  await showCheckout();
+}
+async function doOrderFromText(t) {
+  const hits = findMenus(t), qty = parseQty(t);
+  if (!hits.length) return doFallback();
+  if (hits.length === 1) return addToCart(hits[0].storeId, hits[0].idx, qty);
+  S.awaiting = 'menuPick';
+  await bot(tone('비슷한 메뉴가 여러 개 있어요. 어떤 걸로 담을까요?', '해당하는 메뉴가 여러 개입니다. 선택해 주세요.'));
+  rich(btns(hits.slice(0, 5).map(h => ({label:`${h.name} · ${store(h.storeId).name} (${won(h.price)})`, data:{act:'add', store:h.storeId, idx:h.idx, qty}}))));
+}
+function bestCoupon(subtotal) {
+  const w = currentWx();
+  return S.coupons.filter(c => !c.used && subtotal >= c.min && (!c.cond || (w && w.tags.includes(c.cond)))).sort((a, b) => b.amount - a.amount)[0] || null;
+}
+function cartTotals() {
+  const s = store(S.cartStore);
+  const subtotal = S.cart.reduce((a, i) => a + i.price * i.qty, 0);
+  const cp = bestCoupon(subtotal);
+  return {s, subtotal, fee: s.fee, coupon: cp, total: subtotal + s.fee - (cp ? cp.amount : 0)};
+}
+async function showCheckout() {
+  if (!S.cart.length) {
+    await bot(tone('장바구니가 비어 있어요. 먼저 메뉴를 골라 볼까요?', '장바구니가 비어 있습니다. 메뉴를 먼저 선택해 주세요.'));
+    rich(btns([sendBtn('오늘 뭐 먹지?')]));
+    return;
+  }
+  const {s, subtotal, fee, coupon, total} = cartTotals();
+  S.awaiting = 'confirmOrder';
+  rich(`<div class="ticket" role="group" aria-label="주문 확인">
+    <div class="t-head">${esc(s.name)}<span>주문 확인</span></div>
+    <table>
+      ${S.cart.map(i => `<tr><td>${esc(i.name)} × ${i.qty}</td><td class="n">${won(i.price * i.qty)}</td></tr>`).join('')}
+      <tr><td>배달비</td><td class="n">${won(fee)}</td></tr>
+      ${coupon ? `<tr class="disc"><td>쿠폰: ${esc(coupon.name)}</td><td class="n">-${won(coupon.amount)}</td></tr>` : ''}
+      <tr class="sum"><td>합계 · 약 ${s.eta}분</td><td class="n">${won(total)}</td></tr>
+    </table>
+    <div class="t-foot">${btns([{label:'주문하기', primary:true, data:{act:'place'}}, {label:'더 담기', data:{act:'more'}}, {label:'비우기', data:{act:'clear'}}]).replace(/^<div class="inline-btns">|<\/div>$/g, '')}</div>
+  </div>`);
+  await bot(tone(`총 ${won(total)}이고 약 ${s.eta}분 걸려요. 이대로 주문할까요?`, `총 ${won(total)}, 예상 소요 시간은 약 ${s.eta}분입니다. 주문하시겠습니까?`));
+}
+async function placeOrder() {
+  if (!S.cart.length) return showCheckout();
+  if (S.order && !S.order.cancelled && S.order.stage < 3) {
+    S.awaiting = null;
+    return bot(tone('이미 배달 중인 주문이 있어요. 시뮬레이터에서는 한 번에 하나만 주문할 수 있어요.', '진행 중인 주문이 있어 새 주문을 받을 수 없습니다. (시뮬레이터 제한)'));
+  }
+  const {s, total, coupon} = cartTotals();
+  if (coupon) coupon.used = true;
+  const d = new Date();
+  const id = `N${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-${String(Math.floor(Math.random() * 9000) + 1000)}`;
+  S.order = {id, storeId:s.id, items:S.cart.map(i => ({...i})), total, eta:s.eta, stage:0, start:Date.now(), timers:[], delayed:false, cancelled:false, compensated:false};
+  S.cart = []; S.cartStore = null; S.awaiting = null;
+  await bot(tone(`주문 완료! 🎉 주문번호는 ${id}예요. 결제 금액 ${won(total)}.`, `주문이 완료되었습니다. 주문번호 ${id}, 결제 금액 ${won(total)}입니다.`));
+  rich(progCard(S.order));
+  sys('시연용으로 배달이 약 26초 만에 진행돼요');
+  scheduleStages(S.order, 1);
+  renderInspector();
+}
+function scheduleStages(order, from) {
+  order.timers.forEach(clearTimeout); order.timers = [];
+  for (let st = from; st < STAGES.length; st++) {
+    const delay = order.resumeAt ? (st - from + 1) * 5000 : STAGE_AT[st] - (Date.now() - order.start);
+    order.timers.push(setTimeout(() => setStage(order, st), Math.max(300, delay)));
+  }
+}
+async function setStage(order, st) {
+  if (order.cancelled || S.order !== order) return;
+  order.stage = st;
+  updateProg(order);
+  renderInspector();
+  const s = store(order.storeId);
+  if (st === 1) await bot(tone(`${s.name}에서 조리를 시작했어요 🍳`, `${s.name}에서 조리를 시작했습니다.`));
+  if (st === 2) await bot(tone('라이더가 음식을 픽업해서 출발했어요 🛵', '라이더가 음식을 픽업하여 출발했습니다.'));
+  if (st === 3) {
+    await bot(tone('배달 완료! 맛있게 드세요 😋', '배달이 완료되었습니다. 맛있게 드십시오.', {extra:['음식에 문제가 있으면 언제든 말해 주세요.', '문제가 있을 경우 말씀해 주십시오.']}));
+    rich(btns([sendBtn('문제가 생겼어요'), sendBtn('고마워!')]));
+  }
+}
+function remainText(o) {
+  if (o.cancelled) return '주문 취소됨';
+  if (o.stage >= 3) return '배달 완료';
+  if (o.delayed) return '라이더 지연 · 약 15분 늦어짐';
+  if (o.resumeAt) return '약 10분 남음';
+  const left = Math.max(1, Math.round(o.eta * (1 - (Date.now() - o.start) / DEMO_MS)));
+  return `약 ${left}분 남음`;
+}
+function progCard(o) {
+  return `<div class="prog" data-order="${o.id}">${progInner(o)}</div>`;
+}
+function progInner(o) {
+  const s = store(o.storeId);
+  return `<div class="p-head"><span>${esc(s.name)} · <b>${o.id}</b></span><span class="eta ${o.delayed ? 'late' : ''}">${remainText(o)}</span></div>
+    <ol class="steps">${STAGES.map((n, i) => `<li class="${o.cancelled ? (i === 0 ? 'cancel' : '') : i < o.stage ? 'done' : i === o.stage ? 'now' : ''}">${o.cancelled && i === 0 ? '취소됨' : n}</li>`).join('')}</ol>`;
+}
+function updateProg(o) {
+  document.querySelectorAll(`.prog[data-order="${o.id}"]`).forEach(el => el.innerHTML = progInner(o));
+}
+setInterval(() => { if (S.order && !S.order.cancelled && S.order.stage < 3) updateProg(S.order); }, 1000);
+
+/* --- 배달 조회·지연 --- */
+async function doTrack() {
+  const o = S.order;
+  if (!o) {
+    await bot(tone('지금 진행 중인 주문이 없어요. 뭐 하나 시켜 볼까요? 😋', '현재 진행 중인 주문이 없습니다.'));
+    rich(btns([sendBtn('오늘 뭐 먹지?')]));
+    return;
+  }
+  if (o.cancelled) return bot(tone(`${o.id} 주문은 취소됐어요.`, `${o.id} 주문은 취소된 상태입니다.`));
+  await bot(tone(`${o.id} 주문은 지금 '${STAGES[o.stage]}' 단계예요. ${remainText(o)}.`, `${o.id} 주문은 현재 '${STAGES[o.stage]}' 단계입니다. (${remainText(o)})`));
+  rich(progCard(o));
+}
+async function doLate() {
+  const o = S.order;
+  if (!o || o.cancelled) {
+    await bot(tone('확인해 보니 지금 배달 중인 주문이 없어요. 다른 앱이나 다른 계정으로 주문하셨다면 상담원이 도와드릴 수 있어요.', '진행 중인 주문이 확인되지 않습니다. 상담원 연결을 도와드릴까요?', {serious:true}));
+    rich(btns([{label:'상담원 연결', data:{act:'agent'}}]));
+    return;
+  }
+  if (o.stage >= 3) {
+    await bot(tone('기록상으로는 배달 완료로 나와요. 혹시 못 받으셨다면 바로 상담원에게 연결해 드릴게요.', '배달 완료로 확인됩니다. 수령하지 못하셨다면 상담원에게 연결해 드리겠습니다.', {serious:true, warm:['많이 당황스러우셨겠어요.', '불편을 드려 죄송합니다.']}));
+    rich(btns([{label:'상담원 연결', primary:true, data:{act:'agent'}}]));
+    return;
+  }
+  const overdue = o.delayed || (Date.now() - o.start) > DEMO_MS * 0.8;
+  if (overdue && !o.compensated) {
+    o.compensated = true;
+    S.coupons.push({id:'c-late', name:'지연 보상', amount:2000, min:0, used:false});
+    await bot(tone('오래 기다리게 해서 정말 죄송해요.', '오래 기다리시게 하여 대단히 죄송합니다.', {serious:true}));
+    await bot(tone(`지금 '${STAGES[o.stage]}' 단계이고, 라이더 사정으로 늦어지고 있어요. 다른 라이더를 배정해서 약 10분 안에 도착하도록 할게요. 지연 보상으로 2,000원 쿠폰을 넣어 드렸어요.`, `현재 '${STAGES[o.stage]}' 단계이며 라이더 사정으로 지연되고 있습니다. 라이더를 재배정하여 약 10분 내 도착 예정입니다. 지연 보상으로 2,000원 쿠폰을 지급했습니다.`, {serious:true}));
+    if (o.delayed) { o.delayed = false; o.resumeAt = Date.now(); scheduleStages(o, 3); }
+    updateProg(o);
+    rich(progCard(o));
+    return;
+  }
+  await bot(tone(`기다리기 힘드시죠. 지금 '${STAGES[o.stage]}' 단계이고 ${remainText(o)}이에요. 예정 시간 안에 도착할 거예요.`, `현재 '${STAGES[o.stage]}' 단계이며 ${remainText(o)}입니다. 예정 시간 내 도착 예정입니다.`, {serious:true}));
+  rich(progCard(o));
+}
+async function triggerDelay() {
+  const o = S.order;
+  if (!o || o.cancelled || o.stage >= 3) return;
+  o.timers.forEach(clearTimeout); o.timers = [];
+  o.delayed = true;
+  if (o.stage < 2) o.stage = 2;
+  updateProg(o); renderInspector();
+  sys('시나리오: 라이더 지연 발생');
+  await bot(tone('죄송해요, 라이더 사정으로 배달이 조금 늦어지고 있어요. 상황을 계속 확인하고 있어요.', '라이더 사정으로 배달이 지연되고 있습니다. 진행 상황을 확인 중입니다.', {serious:true}));
+}
+
+/* --- 문제 접수 --- */
+function targetOrder() {
+  if (S.order && !S.order.cancelled) return {o:S.order, past:false};
+  return {o:PAST_ORDER, past:true};
+}
+async function startIssue(t) {
+  const {o, past} = targetOrder();
+  S.issue = {orderId:o.id, type:null, photo:false, amount:o.items[0].price};
+  const head = past ? `최근 주문(${o.id}, ${store(o.storeId).name}, ${PAST_ORDER.note})` : `주문 ${o.id}`;
+  await bot(tone(`${head} 기준으로 도와드릴게요.`, `${head} 건으로 접수를 도와드리겠습니다.`, {serious:true, warm:['불편을 드려 정말 죄송해요.', '불편을 드려 대단히 죄송합니다.']}));
+  let type = null;
+  if (/(다르게|잘못|다른\s*메뉴)/.test(t)) type = 'wrong';
+  else if (/(빠졌|빠져|누락)/.test(t)) type = 'missing';
+  else if (/(식었|차가|이물|쏟|흘|상했|이상)/.test(t)) type = 'bad';
+  if (type) return issueType(type);
+  S.awaiting = 'issueType';
+  await bot(tone('어떤 문제가 있었나요?', '어떤 문제가 있으셨나요?', {serious:true}));
+  rich(btns([{label:'메뉴가 다르게 왔어요', data:{act:'issueType', v:'wrong'}}, {label:'빠진 메뉴가 있어요', data:{act:'issueType', v:'missing'}}, {label:'음식 상태가 이상해요', data:{act:'issueType', v:'bad'}}]));
+}
+const ISSUE_NAME = {wrong:'메뉴 오배달', missing:'메뉴 누락', bad:'음식 상태 불량'};
+async function issueType(v) {
+  if (!S.issue) S.issue = {orderId:targetOrder().o.id, amount:targetOrder().o.items[0].price};
+  S.issue.type = v;
+  S.awaiting = 'issuePhoto';
+  S.intent = 'issue';
+  await bot(tone(`'${ISSUE_NAME[v]}'로 접수할게요. 사진을 보내 주시면 더 빨리 처리돼요.`, `'${ISSUE_NAME[v]}'(으)로 접수합니다. 사진을 첨부해 주시면 처리가 빨라집니다.`, {serious:true}));
+  rich(btns([{label:'사진 첨부 (시뮬레이션)', data:{act:'photo', v:'1'}}, {label:'사진 없이 진행', data:{act:'photo', v:'0'}}]));
+}
+async function issuePhoto(v) {
+  if (!S.issue) return;
+  S.issue.photo = v === '1';
+  S.awaiting = 'issueResolve';
+  if (S.issue.photo) sys('사진 1장 첨부됨 (시뮬레이션)');
+  const opts = S.issue.type === 'missing'
+    ? [{label:'빠진 메뉴 다시 받기', primary:true, data:{act:'resolve', v:'redeliver'}}, {label:'해당 메뉴 환불', data:{act:'resolve', v:'refund'}}]
+    : [{label:'다시 배달받기', primary:true, data:{act:'resolve', v:'redeliver'}}, {label:'환불받기', data:{act:'resolve', v:'refund'}}];
+  opts.push({label:'상담원과 이야기하기', data:{act:'resolve', v:'agent'}});
+  await bot(tone('어떻게 해결해 드릴까요?', '원하시는 해결 방법을 선택해 주십시오.', {serious:true}));
+  rich(btns(opts));
+}
+async function issueResolve(v) {
+  const is = S.issue;
+  if (!is) return;
+  S.awaiting = null;
+  if (v === 'redeliver') await bot(tone(`가게에 바로 전달했어요. 다시 만들어서 약 40분 안에 보내 드릴게요. 접수번호는 R-${is.orderId}예요.`, `가게에 전달했습니다. 약 40분 내 재배달 예정이며 접수번호는 R-${is.orderId}입니다.`, {serious:true}));
+  if (v === 'refund') await bot(tone(`${won(is.amount)} 환불을 접수했어요. 결제한 수단으로 3~5영업일 안에 돌아가요. (예시 규정)`, `${won(is.amount)} 환불이 접수되었습니다. 결제 수단으로 3~5영업일 내 환불됩니다. (예시 규정)`, {serious:true}));
+  if (v === 'agent') return doCounselor(ISSUE_NAME[is.type] + ' 문의');
+  S.issue = null;
+  await bot(tone('다시 한번 불편을 드려 죄송해요. 다른 도움이 필요하면 말씀해 주세요.', '다시 한번 사과드립니다. 추가로 필요하신 사항이 있으면 말씀해 주십시오.', {serious:true}));
+}
+
+/* --- 취소 --- */
+async function startCancel() {
+  const o = S.order;
+  if (!o || o.cancelled) {
+    await bot(tone('지금 취소할 수 있는 주문이 없어요. 이미 받은 음식에 문제가 있다면 문제 접수로 환불을 도와드릴게요.', '취소 가능한 주문이 없습니다. 수령한 음식에 문제가 있으면 문제 접수를 통해 환불해 드립니다.'));
+    rich(btns([sendBtn('문제가 생겼어요')]));
+    return;
+  }
+  if (o.stage === 0) {
+    S.awaiting = 'cancelConfirm';
+    await bot(tone(`아직 가게가 조리를 시작하기 전이라 바로 취소할 수 있어요. ${o.id} 주문을 취소할까요? 결제 금액 ${won(o.total)}은 전액 환불돼요.`, `조리 시작 전이므로 즉시 취소가 가능합니다. ${o.id} 주문을 취소하시겠습니까? ${won(o.total)}이 전액 환불됩니다.`));
+    rich(btns([{label:'주문 취소하기', data:{act:'cancelYes'}}, {label:'그대로 두기', primary:true, data:{act:'cancelNo'}}]));
+    return;
+  }
+  if (o.stage < 3) {
+    await bot(tone(`이미 '${STAGES[o.stage]}' 단계라 바로 취소는 어려워요. 가게와 조율이 필요해서 상담원에게 연결해 드릴게요.`, `현재 '${STAGES[o.stage]}' 단계로 즉시 취소가 불가합니다. 가게와 조율이 필요하여 상담원에게 연결해 드리겠습니다.`, {serious:true}));
+    rich(btns([{label:'상담원 연결', primary:true, data:{act:'agent'}}, sendBtn('그냥 기다릴게요', '고마워')]));
+    return;
+  }
+  await bot(tone('배달이 끝난 주문은 취소 대신 문제 접수로 환불을 도와드려요.', '배달 완료된 주문은 문제 접수를 통해 환불을 진행합니다.'));
+  rich(btns([sendBtn('문제가 생겼어요')]));
+}
+async function doCancel() {
+  const o = S.order;
+  S.awaiting = null;
+  if (!o || o.stage > 0) return startCancel();
+  o.timers.forEach(clearTimeout);
+  o.cancelled = true;
+  updateProg(o);
+  await bot(tone(`${o.id} 주문을 취소했어요. ${won(o.total)}은 결제 수단으로 환불돼요.`, `${o.id} 주문이 취소되었습니다. ${won(o.total)}이 결제 수단으로 환불됩니다.`));
+  renderInspector();
+}
+
+/* --- 기타 인텐트 --- */
+async function doCoupon() {
+  const list = S.coupons.filter(c => !c.used);
+  if (!list.length) return bot(tone('지금 쓸 수 있는 쿠폰이 없어요 😢', '사용 가능한 쿠폰이 없습니다.'));
+  await bot(tone(`쓸 수 있는 쿠폰이 ${list.length}장 있어요! 주문할 때 가장 큰 할인이 자동으로 적용돼요 🎟️`, `사용 가능한 쿠폰은 ${list.length}장이며, 주문 시 할인액이 가장 큰 쿠폰이 자동 적용됩니다.`));
+  rich(`<div class="ticket"><div class="t-head">내 쿠폰<span>${list.length}장</span></div><table>${list.map(c => `<tr><td>${esc(c.name)}${c.min ? ` (${won(c.min)} 이상)` : ''}${c.cond === 'rain' ? ' · 비 오는 날만' : ''}</td><td class="n">-${won(c.amount)}</td></tr>`).join('')}</table></div>`);
+}
+async function doWhoami() {
+  if (S.p.ext >= 60 && S.p.cas >= 50) await bot(tone('네, 저는 한끼배달의 AI 챗봇 냠냠이예요! 🤖 사람은 아니지만 야식 고르는 실력은 사람 못지않답니다. 뭐 드실지 같이 골라 볼까요?', '네, 저는 AI 챗봇 냠냠이입니다.'));
+  else await bot(tone('네, 저는 AI 챗봇 냠냠이예요. 사람 상담원이 필요하면 언제든 연결해 드릴게요.', '네, 저는 한끼배달의 AI 챗봇입니다. 상담원 연결이 필요하시면 말씀해 주십시오.'));
+}
+async function doInsult() {
+  await bot(tone('제가 부족했다면 미안해요.', '불편을 드렸다면 죄송합니다.', {warm:['많이 답답하셨죠.', '답답하셨을 것 같습니다.'], serious:true}));
+  await bot(tone('어떤 부분이 불편했는지 알려 주시면 바로 해결해 볼게요. 사람 상담원이 편하시면 연결해 드릴 수도 있어요.', '불편하신 점을 말씀해 주시면 해결해 드리겠습니다. 상담원 연결도 가능합니다.', {serious:true}));
+  rich(btns([{label:'상담원 연결', data:{act:'agent'}}, sendBtn('내 주문 어디쯤?')]));
+}
+async function doOfftopic() {
+  if (S.p.ext >= 60 && S.p.cas >= 50) await bot(tone('앗, 그건 제 전문이 아니에요 😅 대신 그거 하면서 먹을 야식은 기가 막히게 골라 드릴 수 있어요!', '해당 요청은 도와드리기 어렵습니다.'));
+  else await bot(tone('죄송해요, 저는 음식 주문과 배달만 도와드릴 수 있어요.', '죄송합니다. 저는 음식 주문 및 배달 관련 문의만 도와드릴 수 있습니다.'));
+  rich(btns([sendBtn('오늘 뭐 먹지?'), sendBtn('아무거나 골라줘')]));
+}
+async function doAllergy() {
+  await bot(tone('알레르기는 정말 중요해서 제가 "괜찮다"고 말씀드릴 수 없어요. 주문 요청사항에 꼭 적어 주시고, 가게에 직접 확인해 주세요.', '알레르기 정보는 챗봇이 보장해 드릴 수 없습니다. 주문 요청사항에 기재하시고 가게에 직접 확인해 주십시오.', {serious:true}));
+}
+async function doHelp() {
+  await bot(tone('저는 이런 걸 도와드려요!\n· 날씨·취향에 맞는 메뉴 추천\n· 메뉴 담기와 주문\n· 배달 조회\n· 지연·오배달 같은 문제 접수, 취소·환불\n· 쿠폰 확인', '다음 업무를 도와드립니다.\n· 메뉴 추천\n· 주문\n· 배달 조회\n· 문제 접수 및 취소·환불\n· 쿠폰 확인'));
+}
+async function doFallback() {
+  S.misses++;
+  if (S.misses >= 2) {
+    await bot(tone('계속 제대로 못 알아들어서 미안해요. 상담원에게 연결해 드릴까요?', '요청을 이해하지 못해 죄송합니다. 상담원에게 연결해 드릴까요?', {serious:true}));
+    rich(btns([{label:'상담원 연결', primary:true, data:{act:'agent'}}, sendBtn('오늘 뭐 먹지?'), sendBtn('내 주문 어디쯤?')]));
+    return;
+  }
+  await bot(tone('음, 잘 이해하지 못했어요 🤔 이런 건 바로 도와드릴 수 있어요!', '요청을 이해하지 못했습니다. 아래에서 선택해 주십시오.'));
+  rich(btns([sendBtn('오늘 뭐 먹지?'), sendBtn('내 주문 어디쯤?'), sendBtn('문제가 생겼어요'), sendBtn('쿠폰 보기')]));
+}
+async function doCounselor(reason) {
+  S.intent = 'counselor';
+  S.awaiting = null;
+  await bot(tone('상담원에게 연결할게요. 지금까지 대화 내용도 같이 전달할게요.', '상담원에게 연결합니다. 대화 내용이 함께 전달됩니다.', {serious:true}));
+  sys(`상담원 연결 요청 · 사유: ${reason} · 대기 1명 (시뮬레이션)`);
+  await sleep(reduceMotion ? 0 : 1600);
+  await bot('안녕하세요, 한끼배달 상담원입니다. 냠냠이가 전달한 내용을 확인했어요. 바로 확인해서 도와드릴게요. (시뮬레이션 메시지)', {agent:true});
+  S.misses = 0;
+}
+async function doRoulette() {
+  S.awaiting = null;
+  await bot(tone('결정이 어렵죠? 룰렛 돌려 볼게요! 🎲', '무작위로 하나를 골라 드리겠습니다.', {lead:true}));
+  const box = rich('<div class="roulette" aria-live="off">…</div>');
+  const el = box.querySelector('.roulette');
+  const w = currentWx();
+  let pool = STORES;
+  if (w) { const fit = STORES.filter(s => s.weather.some(x => w.tags.includes(x))); if (fit.length) pool = fit; }
+  const final = pick(pool);
+  if (!reduceMotion) for (let i = 0; i < 14; i++) { el.textContent = pick(STORES).name; await sleep(60 + i * 12); }
+  el.textContent = final.name;
+  S.slotsUsed = true;
+  await bot(tone(`오늘은 ${final.name}! 이걸로 가 볼까요? 😆`, `${final.name}이(가) 선택되었습니다.`));
+  rich(`<div class="carousel">${storeCard(final, w && final.weather.some(x => w.tags.includes(x)) ? [`${w.icon} 오늘 날씨에 어울려요`] : [])}</div>`);
+}
+
+/* =========================================================
+   9. 이벤트 연결
+   ========================================================= */
+$('#composer').addEventListener('submit', e => {
+  e.preventDefault();
+  if (busy) return;
+  const v = $('#input').value;
+  $('#input').value = '';
+  handleUser(v);
+});
+const QUICK = ['오늘 뭐 먹지?', '비 오는 날 메뉴', '매운 거 혼자 먹을래', '짬뽕 2개 시켜줘', '내 주문 어디쯤?', '왜 안 와요?', '쿠폰 보기', '문제가 생겼어요', '주문 취소할래요', '너 AI야?', '아무거나 골라줘'];
+$('#chips').innerHTML = QUICK.map(q => `<button type="button" data-act="send" data-text="${esc(q)}">${esc(q)}</button>`).join('');
+
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-act]');
+  if (!b || busy) return;
+  const a = b.dataset.act;
+  if (a === 'send') return handleUser(b.dataset.text);
+  busy = true;
+  try {
+    if (a === 'add') { addUser(`${store(b.dataset.store).menus[+b.dataset.idx][0]} 담기`); S.awaiting = null; await addToCart(b.dataset.store, +b.dataset.idx, +(b.dataset.qty || 1)); }
+    else if (a === 'place') { addUser('주문하기'); S.intent = 'confirm'; await placeOrder(); }
+    else if (a === 'more') { addUser('더 담을래요'); S.awaiting = null; await bot(tone('추천 카드에서 [담기]를 누르거나 "튀김 추가"처럼 말해 주세요.', '추천 카드에서 [담기]를 누르시거나 메뉴 이름을 말씀해 주십시오.')); }
+    else if (a === 'clear') { addUser('장바구니 비우기'); S.cart = []; S.cartStore = null; S.awaiting = null; await bot(tone('장바구니를 비웠어요.', '장바구니를 비웠습니다.')); }
+    else if (a === 'agent') { addUser('상담원 연결'); await doCounselor('버튼 요청'); }
+    else if (a === 'cancelYes') { addUser('주문 취소하기'); await doCancel(); }
+    else if (a === 'cancelNo') { addUser('그대로 두기'); S.awaiting = null; await bot(tone('네, 주문은 그대로 진행할게요 🛵', '주문을 그대로 진행합니다.')); }
+    else if (a === 'issueType') { addUser(b.textContent); await issueType(b.dataset.v); }
+    else if (a === 'photo') { addUser(b.textContent); await issuePhoto(b.dataset.v); }
+    else if (a === 'resolve') { addUser(b.textContent); await issueResolve(b.dataset.v); }
+  } finally { busy = false; renderInspector(); }
+});
+
+$('#presets').addEventListener('click', async e => {
+  const b = e.target.closest('[data-preset]');
+  if (!b || busy) return;
+  const p = PRESETS.find(x => x.id === b.dataset.preset);
+  S.p = {...p.p}; S.preset = p.id;
+  renderPresets(); renderSliders();
+  sys(`말투 변경: ${p.name}`);
+  busy = true;
+  try { await bot(tone('이제 이런 말투로 이야기할게요! 오늘 뭐 드시고 싶으세요? 😋', '지금부터 이 말투로 안내해 드리겠습니다. 무엇을 도와드릴까요?', {lead:true})); }
+  finally { busy = false; }
+});
+$('#sliders').addEventListener('input', e => {
+  const k = e.target.id.replace('sl-', '');
+  if (!(k in S.p)) return;
+  S.p[k] = +e.target.value;
+  $('#v-' + k).textContent = S.p[k] + '%';
+  const match = PRESETS.find(p => Object.keys(p.p).every(x => p.p[x] === S.p[x]));
+  S.preset = match ? match.id : null;
+  renderPresets();
+});
+$('#wxOverride').addEventListener('change', e => { S.override = e.target.value; renderWeather(); renderInspector(); });
+$('#geoBtn').addEventListener('click', () => {
+  if (!navigator.geolocation) { logApi(false, '브라우저 위치 기능을 쓸 수 없어요'); return; }
+  navigator.geolocation.getCurrentPosition(
+    pos => loadWeather(pos.coords.latitude, pos.coords.longitude, '현재 위치'),
+    err => logApi(false, `위치 권한 거부 또는 실패 (${err.message || err.code}) · 서울 기준 유지`),
+    {timeout: 8000}
+  );
+});
+$('#delayBtn').addEventListener('click', async () => { if (busy) return; busy = true; try { await triggerDelay(); } finally { busy = false; renderInspector(); } });
+$('#panelToggle').addEventListener('click', () => {
+  const open = $('#panel').classList.toggle('open');
+  $('#panelToggle').setAttribute('aria-expanded', open);
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { $('#panel').classList.remove('open'); $('#panelToggle').setAttribute('aria-expanded', 'false'); } });
+$('#resetBtn').addEventListener('click', () => { if (!busy) start(); });
+
+/* =========================================================
+   10. 시작
+   ========================================================= */
+async function start() {
+  if (S.order) S.order.timers.forEach(clearTimeout);
+  Object.assign(S, {intent:null, slots:{taste:null, category:null, people:null, budget:null}, slotsUsed:false, wxMode:false, awaiting:null, misses:0, cart:[], cartStore:null, order:null, issue:null, coupons:COUPONS.map(c => ({...c, used:false}))});
+  log.innerHTML = '';
+  renderInspector();
+  busy = true;
+  try {
+    await bot(tone('안녕하세요! 한끼배달 AI 챗봇 냠냠이예요 🍚 저는 사람이 아닌 AI라서, 어려운 문제는 상담원에게 바로 연결해 드릴게요.', '안녕하세요. 한끼배달 AI 챗봇 냠냠이입니다. 저는 AI이며, 필요 시 상담원에게 연결해 드립니다.'));
+    await bot(tone('메뉴 추천, 주문, 배달 조회, 문제 접수까지 도와드려요. 오늘 뭐 드시고 싶으세요?', '메뉴 추천, 주문, 배달 조회, 문제 접수를 도와드립니다. 무엇을 도와드릴까요?'));
+  } finally { busy = false; }
+}
+renderPresets(); renderSliders(); renderWeather(); renderApiLog(); renderInspector();
+start();
+loadWeather();
+</script>
+</body>
+</html>
