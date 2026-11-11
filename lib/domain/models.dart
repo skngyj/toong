@@ -21,6 +21,18 @@ const roomExpiredMessage = '48시간 동안 입력이 없어 삭제된 방입니
 const roomMissingMessage = '방을 찾을 수 없어요. 48시간 동안 입력이 없어 삭제되었을 수 있습니다.';
 const roomExpiryNotice = '정산을 완료하지 않고 48시간 동안 입력이 없으면 방이 삭제됩니다.';
 
+/// 방 링크. 누르면 앱이 열리고 닉네임만 입력해 같은 방에 입장한다.
+///
+/// 코드를 경로에 둔다. `?code=`로 두면 Supabase 로그인 콜백으로 오인된다.
+String roomLink(String code) => 'toong://join/$code';
+
+/// 방 링크에서 방 코드를 꺼낸다. 방 링크가 아니면 null.
+String? codeFromLink(Uri uri) {
+  if (uri.scheme != 'toong' || uri.host != 'join') return null;
+  final code = uri.pathSegments.firstOrNull?.toUpperCase() ?? '';
+  return RegExp(r'^[A-Z0-9]{6,8}$').hasMatch(code) ? code : null;
+}
+
 /// 삭제까지 남은 시간을 "1일 3시간", "5시간 20분", "12분" 형태로 보여준다.
 String formatRemaining(Duration remaining) {
   if (remaining <= Duration.zero) return '곧 삭제';

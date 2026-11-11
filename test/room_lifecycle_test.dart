@@ -282,4 +282,14 @@ void main() {
       expect(await records.list(), isEmpty);
     });
   });
+
+  test('방 링크는 방 코드를 담고, 방 링크가 아닌 주소는 걸러낸다', () {
+    expect(roomLink('ABC2345'), 'toong://join/ABC2345');
+    expect(codeFromLink(Uri.parse('toong://join/abc2345')), 'ABC2345');
+    expect(codeFromLink(Uri.parse('toong://join/A1B2C3D4')), 'A1B2C3D4');
+    expect(codeFromLink(Uri.parse('toong://join')), isNull);
+    expect(codeFromLink(Uri.parse('toong://join/AB')), isNull);
+    expect(codeFromLink(Uri.parse('toong://other/ABC2345')), isNull);
+    expect(codeFromLink(Uri.parse('https://join/ABC2345')), isNull);
+  });
 }

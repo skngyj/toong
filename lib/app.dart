@@ -18,12 +18,71 @@ const _soft = Color(0xFFECF1E6);
 String money(int value) =>
     '${value.toString().replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => ',')}원';
 
-class ToongApp extends StatelessWidget {
-  const ToongApp({super.key, required this.store});
+class ToongApp extends StatefulWidget {
+  const ToongApp({super.key, required this.store, this.links});
   final RoomStore store;
+
+  /// 앱을 연 방 링크(`toong://join/코드`)가 들어오는 스트림.
+  final Stream<Uri>? links;
+
+  @override
+  State<ToongApp> createState() => _ToongAppState();
+}
+
+class _ToongAppState extends State<ToongApp> {
+  final navigator = GlobalKey<NavigatorState>();
+  StreamSubscription<Uri>? subscription;
+
+  RoomStore get store => widget.store;
+
+  @override
+  void initState() {
+    super.initState();
+    subscription = widget.links?.listen(openLink);
+  }
+
+  @override
+  void dispose() {
+    subscription?.cancel();
+    super.dispose();
+  }
+
+  /// 방 링크로 들어오면 이미 참여한 방은 바로 열고, 아니면 닉네임만 묻는다.
+  Future<void> openLink(Uri uri) async {
+    final code = codeFromLink(uri);
+    if (code == null) return;
+    // 앱이 링크로 처음 켜졌을 때는 첫 화면이 그려진 뒤에 이동한다.
+    await WidgetsBinding.instance.endOfFrame;
+    Room? joined;
+    try {
+      joined = (await store.listRooms())
+          .where((r) => r.code == code)
+          .firstOrNull;
+    } catch (_) {
+      // 목록을 못 불러와도 입장 화면에서 다시 시도할 수 있다.
+    }
+    final context = navigator.currentContext;
+    if (context == null || !context.mounted) return;
+    if (joined != null) {
+      navigator.currentState!.push(
+        MaterialPageRoute(
+          builder: (_) => RoomPage(store: store, roomId: joined!.id),
+        ),
+      );
+      return;
+    }
+    if (!await guestNotice(context)) return;
+    navigator.currentState?.push(
+      MaterialPageRoute(
+        builder: (_) =>
+            EntryPage(store: store, creating: false, initialCode: code),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) => MaterialApp(
+    navigatorKey: navigator,
     title: '퉁',
     debugShowCheckedModeBanner: false,
     theme: ThemeData(
@@ -175,16 +234,24 @@ class HomePage extends StatelessWidget {
 }
 
 class EntryPage extends StatefulWidget {
-  const EntryPage({super.key, required this.store, required this.creating});
+  const EntryPage({
+    super.key,
+    required this.store,
+    required this.creating,
+    this.initialCode,
+  });
   final RoomStore store;
   final bool creating;
+
+  /// 방 링크로 들어왔을 때 미리 채워 둘 방 코드.
+  final String? initialCode;
   @override
   State<EntryPage> createState() => _EntryPageState();
 }
 
 class _EntryPageState extends State<EntryPage> {
   final form = GlobalKey<FormState>();
-  final name = TextEditingController();
+  late final name = TextEditingController(text: widget.initialCode);
   final nickname = TextEditingController();
   bool busy = false;
 
@@ -680,6 +747,24 @@ class _RoomPageState extends State<RoomPage> {
                               tooltip: '방 코드 복사',
                             ),
                           ],
+                        ),
+                        TextButton.icon(
+                          onPressed: () async {
+                            await Clipboard.setData(
+                              ClipboardData(text: roomLink(r.code)),
+                            );
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    '방 링크를 복사했어요. 친구에게 보내면 링크로 바로 들어올 수 있어요.',
+                                  ),
+                                ),
+                              );
+                            }
+                          },
+                          icon: const Icon(Icons.link),
+                          label: const Text('방 링크 복사'),
                         ),
                       ],
                     ),
