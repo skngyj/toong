@@ -21,6 +21,18 @@ abstract class RoomStore {
   Future<Room> saveRoom(Room room);
   Future<Room> cloneRoom(Room source);
   Future<Room> linkMember(Room room, String historicalId, String joinedId);
+
+  /// 남은 시간을 48시간으로 되돌린다. 방 하나당 [roomExtendLimit]회, 방장만.
+  Future<Room> extendRoom(Room room);
+
+  /// 방을 얼려 삭제 시간을 멈춘다. 동시에 [roomFreezeSlots]개, 방장만.
+  Future<Room> freezeRoom(Room room);
+
+  /// 얼린 방을 녹인다. 그때부터 48시간을 다시 센다.
+  Future<Room> thawRoom(Room room);
+
+  /// 정산을 완료한다. 방은 [roomCompletedLimit] 뒤 삭제된다.
+  Future<Room> completeRoom(Room room);
 }
 
 /// 체험 모드 저장소. 서버와 같은 48시간 규칙을 기기 안에서 적용한다.
@@ -41,6 +53,78 @@ class LocalRoomStore implements RoomStore {
     if (room.isExpiredAt(_now)) throw StateError(roomExpiredMessage);
     return room;
   }
+
+  /// 입력을 받을 수 있는 방인지 확인한다. 얼린 방과 완료된 방은 입력을 막는다.
+  Room _editable(Room room) {
+    _live(room);
+    if (room.isCompleted) throw StateError(roomCompletedMessage);
+    if (room.isFrozen) throw StateError(roomFrozenMessage);
+    return room;
+  }
+
+  /// 방장이 [change]로 방 상태를 바꾼다. 연장·얼리기·녹이기·완료가 함께 쓴다.
+  Future<Room> _ownerUpdate(
+    Room room,
+    Room Function(Room current, List<Room> all, String actor) change,
+  ) async {
+    final rooms = await _all();
+    final index = rooms.indexWhere((r) => r.id == room.id);
+    if (index < 0) throw StateError(roomMissingMessage);
+    final actor = await actorId();
+    final current = _live(rooms[index]);
+    if (!current.owns(actor)) throw StateError('방장만 할 수 있어요.');
+    final updated = change(
+      current,
+      rooms,
+      actor,
+    ).copyWith(version: current.version + 1);
+    rooms[index] = updated;
+    await _write(rooms);
+    return updated;
+  }
+
+  @override
+  Future<Room> extendRoom(Room room) => _ownerUpdate(room, (current, _, _) {
+    _editable(current);
+    if (current.extendsLeft <= 0) {
+      throw StateError('이 방은 더 연장할 수 없어요. (최대 $roomExtendLimit회)');
+    }
+    return current.copyWith(
+      lastActivityAt: _now,
+      extendCount: current.extendCount + 1,
+    );
+  });
+
+  @override
+  Future<Room> freezeRoom(Room room) =>
+      _ownerUpdate(room, (current, all, actor) {
+        _editable(current);
+        final frozen = all.where(
+          (r) => r.isFrozen && r.owns(actor) && !r.isExpiredAt(_now),
+        );
+        if (frozen.length >= roomFreezeSlots) {
+          throw StateError('방은 동시에 $roomFreezeSlots개까지만 얼릴 수 있어요.');
+        }
+        return current.copyWith(frozenAt: _now);
+      });
+
+  @override
+  Future<Room> thawRoom(Room room) => _ownerUpdate(room, (current, _, _) {
+    if (!current.isFrozen) throw StateError('얼린 방이 아니에요.');
+    return current.copyWith(clearFrozen: true, lastActivityAt: _now);
+  });
+
+  @override
+  Future<Room> completeRoom(Room room) => _ownerUpdate(room, (current, _, _) {
+    _editable(current);
+    if (current.expenses.isEmpty) {
+      throw StateError('지출이 없는 방은 정산을 완료할 수 없어요.');
+    }
+    if (current.pendingRemainder > 0) {
+      throw StateError('남은 잔돈의 부담자를 먼저 정해주세요.');
+    }
+    return current.copyWith(completedAt: _now);
+  });
 
   @override
   Future<String> actorId() async {
@@ -129,6 +213,7 @@ class LocalRoomStore implements RoomStore {
     final actor = await actorId();
     final room = _live(rooms[index]);
     if (room.actorMember(actor) != null) return room;
+    _editable(room);
     final updated = room.copyWith(
       members: [
         ...room.members,
@@ -156,7 +241,7 @@ class LocalRoomStore implements RoomStore {
     final rooms = await _all();
     final index = rooms.indexWhere((r) => r.id == room.id);
     if (index < 0) throw StateError(roomMissingMessage);
-    _live(rooms[index]);
+    _editable(rooms[index]);
     if (!rooms[index].owns(await actorId())) {
       throw StateError('방장만 지출과 잔돈을 수정할 수 있습니다.');
     }
@@ -167,7 +252,9 @@ class LocalRoomStore implements RoomStore {
         jsonEncode(room.members.map((m) => m.toJson()).toList())) {
       throw StateError('참여자 변경은 별도 절차로 진행해주세요.');
     }
-    final updated = room.copyWith(
+    // 연장 횟수·얼림·완료 상태는 저장된 값을 따른다.
+    final updated = rooms[index].copyWith(
+      expenses: room.expenses,
       version: room.version + 1,
       lastActivityAt: _now,
     );
@@ -216,7 +303,7 @@ class LocalRoomStore implements RoomStore {
     String historicalId,
     String joinedId,
   ) async {
-    final current = await getRoom(room.id);
+    final current = _editable(await getRoom(room.id));
     if (!current.owns(await actorId())) throw StateError('방장만 기록을 연결할 수 있습니다.');
     final old = current.members.where((m) => m.id == historicalId).firstOrNull;
     final fresh = current.members.where((m) => m.id == joinedId).firstOrNull;
@@ -280,27 +367,56 @@ class CloudRoomStore implements RoomStore {
     return rows.map((row) => _room(row['data'])).toList();
   }
 
-  @override
-  Future<Room> createRoom(String name, String nickname) async {
+  /// 방이 없는 익명 사용자는 서버에서 정리된다. 정리된 사용자의 세션으로
+  /// 방을 만들거나 입장하면 서버가 [_staleSessionCode]로 거절하므로,
+  /// 새 익명 사용자로 다시 로그인해 한 번 더 시도한다.
+  Future<Room> _withFreshSession(Future<dynamic> Function() call) async {
     await _signIn();
-    return _room(
-      await client.rpc(
-        'create_toong_room',
-        params: {'p_name': name, 'p_nickname': nickname},
-      ),
-    );
+    try {
+      return _room(await call());
+    } on PostgrestException catch (error) {
+      if (error.code != _staleSessionCode) rethrow;
+      await client.auth.signOut(scope: SignOutScope.local);
+      await client.auth.signInAnonymously();
+      return _room(await call());
+    }
+  }
+
+  static const _staleSessionCode = 'TG401';
+
+  @override
+  Future<Room> createRoom(String name, String nickname) => _withFreshSession(
+    () => client.rpc(
+      'create_toong_room',
+      params: {'p_name': name, 'p_nickname': nickname},
+    ),
+  );
+
+  @override
+  Future<Room> joinRoom(String code, String nickname) => _withFreshSession(
+    () => client.rpc(
+      'join_toong_room',
+      params: {'p_code': code, 'p_nickname': nickname},
+    ),
+  );
+
+  Future<Room> _roomAction(String function, Room room) async {
+    await _signIn();
+    return _room(await client.rpc(function, params: {'p_room_id': room.id}));
   }
 
   @override
-  Future<Room> joinRoom(String code, String nickname) async {
-    await _signIn();
-    return _room(
-      await client.rpc(
-        'join_toong_room',
-        params: {'p_code': code, 'p_nickname': nickname},
-      ),
-    );
-  }
+  Future<Room> extendRoom(Room room) => _roomAction('extend_toong_room', room);
+
+  @override
+  Future<Room> freezeRoom(Room room) => _roomAction('freeze_toong_room', room);
+
+  @override
+  Future<Room> thawRoom(Room room) => _roomAction('thaw_toong_room', room);
+
+  @override
+  Future<Room> completeRoom(Room room) =>
+      _roomAction('complete_toong_room', room);
 
   @override
   Future<Room> getRoom(String id) async {

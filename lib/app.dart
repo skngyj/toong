@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
 
+import 'data/record_store.dart';
 import 'data/room_store.dart';
 import 'domain/models.dart';
+import 'domain/record.dart';
 import 'domain/settlement.dart';
 
 const _ink = Color(0xFF213025);
@@ -282,17 +284,36 @@ class RoomListPage extends StatefulWidget {
 }
 
 class _RoomListPageState extends State<RoomListPage> {
-  late Future<List<Room>> future;
+  late Future<({List<Room> rooms, List<SettlementRecord> records})> future;
   @override
   void initState() {
     super.initState();
-    future = widget.store.listRooms();
+    future = load();
+  }
+
+  /// 진행 중인 방과 이 기기에 저장된 완료 기록을 함께 불러온다.
+  /// 완료된 방은 서버에서 지워지기 전에 기록으로 저장해 둔다.
+  Future<({List<Room> rooms, List<SettlementRecord> records})> load() async {
+    final records = RecordStore();
+    final rooms = await widget.store.listRooms();
+    for (final room in rooms) {
+      await records.keep(room);
+    }
+    return (
+      rooms: rooms.where((r) => !r.isCompleted).toList(),
+      records: await records.list(),
+    );
+  }
+
+  Future<void> open(Widget page) async {
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => page));
+    if (mounted) setState(() => future = load());
   }
 
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('참여중인 방 목록')),
-    body: FutureBuilder<List<Room>>(
+    body: FutureBuilder(
       future: future,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
@@ -301,33 +322,138 @@ class _RoomListPageState extends State<RoomListPage> {
         if (!snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
-        final rooms = snapshot.data!;
-        if (rooms.isEmpty) return const Center(child: Text('아직 참여한 방이 없어요.'));
+        final (:rooms, :records) = snapshot.data!;
+        if (rooms.isEmpty && records.isEmpty) {
+          return const Center(child: Text('아직 참여한 방이 없어요.'));
+        }
+        final now = DateTime.now();
         return ListView(
           padding: const EdgeInsets.all(20),
-          children: rooms
-              .map(
-                (r) => Card(
-                  child: ListTile(
-                    title: Text(r.name),
-                    subtitle: Text(
-                      '${r.members.length}명 · 지출 ${r.expenses.length}건 · '
-                      '삭제까지 ${formatRemaining(r.remainingAt(DateTime.now()))}',
-                    ),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            RoomPage(store: widget.store, roomId: r.id),
-                      ),
-                    ),
+          children: [
+            if (rooms.isNotEmpty) const _SectionTitle('진행 중인 방'),
+            for (final r in rooms)
+              Card(
+                child: ListTile(
+                  leading: r.isFrozen ? const Icon(Icons.ac_unit) : null,
+                  title: Text(r.name),
+                  subtitle: Text(
+                    '${r.members.length}명 · 지출 ${r.expenses.length}건 · '
+                    '${r.isFrozen ? '얼림 · ' : ''}'
+                    '삭제까지 ${formatRemaining(r.remainingAt(now))}',
                   ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () =>
+                      open(RoomPage(store: widget.store, roomId: r.id)),
                 ),
-              )
-              .toList(),
+              ),
+            if (records.isNotEmpty) ...[
+              if (rooms.isNotEmpty) const SizedBox(height: 16),
+              const _SectionTitle('완료된 정산 기록'),
+              const Padding(
+                padding: EdgeInsets.only(bottom: 8),
+                child: Text(
+                  '이 기기에만 저장돼 있어요. 앱을 삭제하거나 기기를 바꾸면 사라집니다.',
+                  style: TextStyle(fontSize: 13, color: Colors.black54),
+                ),
+              ),
+            ],
+            for (final record in records)
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.receipt_long),
+                  title: Text(record.name),
+                  subtitle: Text('${formatDay(record.completedAt)} 완료'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => open(RecordPage(record: record)),
+                ),
+              ),
+          ],
         );
       },
+    ),
+  );
+}
+
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle(this.text);
+  final String text;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Text(text, style: Theme.of(context).textTheme.titleMedium),
+  );
+}
+
+String formatDay(DateTime time) {
+  final t = time.toLocal();
+  return '${t.year}.${t.month}.${t.day}';
+}
+
+/// 기기에 저장된 완료 정산 기록. 서버 방이 삭제된 뒤에도 볼 수 있다.
+class RecordPage extends StatelessWidget {
+  const RecordPage({super.key, required this.record});
+  final SettlementRecord record;
+
+  Future<void> remove(BuildContext context) async {
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('기록을 지울까요?'),
+        content: const Text('이 기기에서 지우면 되돌릴 수 없어요.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('지우기'),
+          ),
+        ],
+      ),
+    );
+    if (accepted != true) return;
+    await RecordStore().remove(record.roomId);
+    if (context.mounted) Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(
+      title: const Text('정산 기록'),
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.delete_outline),
+          tooltip: '기록 지우기',
+          onPressed: () => remove(context),
+        ),
+      ],
+    ),
+    body: ListView(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+      children: [
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: SelectableText(
+              record.text,
+              style: const TextStyle(height: 1.5),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        FilledButton.icon(
+          onPressed: () async {
+            await Clipboard.setData(ClipboardData(text: record.text));
+            if (context.mounted) {
+              ScaffoldMessenger.of(context)
+                  .showSnackBar(const SnackBar(content: Text('정산 기록을 복사했어요.')));
+            }
+          },
+          icon: const Icon(Icons.copy),
+          label: const Text('기록 복사'),
+        ),
+      ],
     ),
   );
 }
@@ -374,6 +500,8 @@ class _RoomPageState extends State<RoomPage> {
     try {
       final current = await widget.store.getRoom(widget.roomId);
       final id = await widget.store.actorId();
+      // 완료된 방은 서버에서 지워지기 전에 이 기기에 기록으로 남긴다.
+      await RecordStore().keep(current);
       if (mounted) {
         setState(() {
           room = current;
@@ -430,6 +558,65 @@ class _RoomPageState extends State<RoomPage> {
     }
   }
 
+  /// 연장·얼리기·녹이기·완료처럼 방 상태를 바꾸는 방장 동작을 실행한다.
+  Future<void> act(Future<Room> Function(Room room) action, String done) async {
+    try {
+      final updated = await action(room!);
+      await RecordStore().keep(updated);
+      if (!mounted) return;
+      setState(() => room = updated);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(done)));
+    } catch (error) {
+      if (mounted) await showFailure(context, error);
+    }
+  }
+
+  Future<bool> confirm(String title, String body, String action) async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(title),
+          content: Text(body),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('취소'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(action),
+            ),
+          ],
+        ),
+      ) ??
+      false;
+
+  Future<void> freeze() async {
+    if (!await confirm(
+      '방을 얼릴까요?',
+      '얼린 동안에는 삭제 시간이 멈추고, 지출 입력과 새 참여자 입장도 멈춰요. '
+          '얼린 방은 ${roomFreezeLimit.inDays}일 안에 녹이지 않으면 삭제됩니다. '
+          '방은 동시에 $roomFreezeSlots개까지 얼릴 수 있어요.',
+      '얼리기',
+    )) {
+      return;
+    }
+    await act(widget.store.freezeRoom, '방을 얼렸어요.');
+  }
+
+  Future<void> complete() async {
+    if (!await confirm(
+      '정산을 완료할까요?',
+      '완료하면 더 이상 수정할 수 없어요. 방은 ${roomCompletedLimit.inHours}시간 뒤 '
+          '삭제되고, 정산 기록은 각자 기기에 저장됩니다. 친구들은 '
+          '${roomCompletedLimit.inHours}시간 안에 이 방을 열어야 기록이 저장돼요.',
+      '정산 완료',
+    )) {
+      return;
+    }
+    await act(widget.store.completeRoom, '정산을 완료했어요. 기록을 이 기기에 저장했습니다.');
+  }
+
   @override
   Widget build(BuildContext context) {
     final r = room;
@@ -437,7 +624,9 @@ class _RoomPageState extends State<RoomPage> {
     final expired = r != null && r.isExpiredAt(now);
     final isOwner = r != null && actor != null && r.owns(actor!);
     // 기한이 지난 방은 삭제 작업 전이라도 수정·복제를 막는다.
-    final owner = isOwner && !expired;
+    final manager = isOwner && !expired;
+    // 얼린 방과 완료된 방은 입력을 받지 않는다.
+    final owner = manager && !r.isFrozen && !r.isCompleted;
     return Scaffold(
       appBar: AppBar(
         title: Text(r?.name ?? '방'),
@@ -497,7 +686,23 @@ class _RoomPageState extends State<RoomPage> {
                   ),
                 ),
                 const SizedBox(height: 10),
-                _ExpiryCard(room: r, now: now),
+                _ExpiryCard(
+                  room: r,
+                  now: now,
+                  onExtend: owner && r.extendsLeft > 0
+                      ? () => act(
+                          widget.store.extendRoom,
+                          '남은 시간을 ${roomInactiveLimit.inHours}시간으로 되돌렸어요.',
+                        )
+                      : null,
+                  onFreeze: owner ? freeze : null,
+                  onThaw: manager && r.isFrozen && !r.isCompleted
+                      ? () => act(
+                          widget.store.thawRoom,
+                          '방을 녹였어요. 지금부터 ${roomInactiveLimit.inHours}시간을 다시 셉니다.',
+                        )
+                      : null,
+                ),
                 const SizedBox(height: 10),
                 Wrap(
                   spacing: 8,
@@ -579,7 +784,7 @@ class _RoomPageState extends State<RoomPage> {
                     icon: const Icon(Icons.add),
                     label: const Text('지출 추가'),
                   ),
-                if (!isOwner && !expired)
+                if (!isOwner && !expired && !r.isFrozen && !r.isCompleted)
                   const Text('지출과 잔돈 부담자는 방장이 입력할 수 있어요.'),
                 const SizedBox(height: 20),
                 if (r.pendingRemainder > 0)
@@ -603,6 +808,32 @@ class _RoomPageState extends State<RoomPage> {
                         ),
                   child: const Text('정산 결과 보기'),
                 ),
+                if (owner && r.expenses.isNotEmpty && r.pendingRemainder == 0)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: OutlinedButton.icon(
+                      onPressed: complete,
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(double.infinity, 54),
+                      ),
+                      icon: const Icon(Icons.check_circle_outline),
+                      label: const Text('정산 완료'),
+                    ),
+                  ),
+                if (r.isCompleted)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: OutlinedButton.icon(
+                      onPressed: () => open(
+                        RecordPage(record: SettlementRecord.fromRoom(r)),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(double.infinity, 54),
+                      ),
+                      icon: const Icon(Icons.receipt_long),
+                      label: const Text('정산 기록 보기'),
+                    ),
+                  ),
                 const SizedBox(height: 22),
                 TextButton.icon(
                   onPressed: expired ? null : copyRoom,
@@ -625,15 +856,47 @@ class _RoomPageState extends State<RoomPage> {
 }
 
 class _ExpiryCard extends StatelessWidget {
-  const _ExpiryCard({required this.room, required this.now});
+  const _ExpiryCard({
+    required this.room,
+    required this.now,
+    this.onExtend,
+    this.onFreeze,
+    this.onThaw,
+  });
   final Room room;
   final DateTime now;
+
+  /// null이면 해당 버튼을 보여주지 않는다. 방장에게만 전달된다.
+  final VoidCallback? onExtend;
+  final VoidCallback? onFreeze;
+  final VoidCallback? onThaw;
 
   @override
   Widget build(BuildContext context) {
     final expired = room.isExpiredAt(now);
     final remaining = room.remainingAt(now);
+    final left = '삭제까지 ${formatRemaining(remaining)}';
     final urgent = !expired && remaining < const Duration(hours: 6);
+    final (icon, title, body) = switch (room) {
+      _ when expired => (
+        Icons.block,
+        room.isCompleted || room.isFrozen
+            ? '보관 기간이 지나 삭제된 방입니다.'
+            : roomExpiredMessage,
+        '더 이상 입력·복제할 수 없어요. 필요한 내용은 지금 확인해주세요.',
+      ),
+      Room(isCompleted: true) => (
+        Icons.check_circle_outline,
+        '정산 완료 · $left',
+        '정산 기록은 이 기기에 저장됐어요. 방은 완료 ${roomCompletedLimit.inHours}시간 뒤 삭제됩니다.',
+      ),
+      Room(isFrozen: true) => (
+        Icons.ac_unit,
+        '얼린 방 · $left',
+        '얼린 동안에는 입력할 수 없어요. ${roomFreezeLimit.inDays}일 안에 녹이지 않으면 삭제됩니다.',
+      ),
+      _ => (Icons.timer_outlined, left, roomExpiryNotice),
+    };
     return Card(
       color: expired || urgent ? const Color(0xFFFFF1E6) : _soft,
       elevation: 0,
@@ -642,29 +905,51 @@ class _ExpiryCard extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(
-              expired ? Icons.block : Icons.timer_outlined,
-              color: _ink,
-              size: 20,
-            ),
+            Icon(icon, color: _ink, size: 20),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    expired
-                        ? roomExpiredMessage
-                        : '삭제까지 ${formatRemaining(remaining)}',
+                    title,
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    expired
-                        ? '더 이상 입력·복제할 수 없어요. 필요한 내용은 지금 확인해주세요.'
-                        : roomExpiryNotice,
+                    body,
                     style: const TextStyle(fontSize: 13, color: Colors.black54),
                   ),
+                  if (onExtend != null || onFreeze != null || onThaw != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Wrap(
+                        spacing: 8,
+                        children: [
+                          if (onExtend != null)
+                            OutlinedButton.icon(
+                              onPressed: onExtend,
+                              icon: const Icon(Icons.update, size: 18),
+                              label: Text('연장 (${room.extendsLeft}회 남음)'),
+                            ),
+                          if (onFreeze != null)
+                            OutlinedButton.icon(
+                              onPressed: onFreeze,
+                              icon: const Icon(Icons.ac_unit, size: 18),
+                              label: const Text('얼리기'),
+                            ),
+                          if (onThaw != null)
+                            OutlinedButton.icon(
+                              onPressed: onThaw,
+                              icon: const Icon(
+                                Icons.wb_sunny_outlined,
+                                size: 18,
+                              ),
+                              label: const Text('녹이기'),
+                            ),
+                        ],
+                      ),
+                    ),
                 ],
               ),
             ),

@@ -3,6 +3,20 @@ import 'dart:convert';
 /// 정산을 완료하지 않은 방은 마지막 입력 후 이 시간이 지나면 삭제된다.
 const roomInactiveLimit = Duration(hours: 48);
 
+/// 방 하나를 연장할 수 있는 횟수. 연장하면 남은 시간이 48시간으로 돌아간다.
+const roomExtendLimit = 3;
+
+/// 얼린 방은 삭제 시간이 멈추지만, 얼린 뒤 이 기간이 지나면 삭제된다.
+const roomFreezeLimit = Duration(days: 7);
+
+/// 한 사람이 동시에 얼려 둘 수 있는 방 수.
+const roomFreezeSlots = 2;
+
+/// 정산을 완료한 방은 이 시간이 지나면 삭제된다. 기록은 각자 기기에 남는다.
+const roomCompletedLimit = Duration(hours: 12);
+
+const roomFrozenMessage = '얼린 방입니다. 방장이 녹인 뒤에 입력할 수 있어요.';
+const roomCompletedMessage = '정산이 완료된 방입니다. 고치려면 정산을 복제해주세요.';
 const roomExpiredMessage = '48시간 동안 입력이 없어 삭제된 방입니다.';
 const roomMissingMessage = '방을 찾을 수 없어요. 48시간 동안 입력이 없어 삭제되었을 수 있습니다.';
 const roomExpiryNotice = '정산을 완료하지 않고 48시간 동안 입력이 없으면 방이 삭제됩니다.';
@@ -134,6 +148,9 @@ class Room {
     required this.version,
     required this.lastActivityAt,
     this.sourceRoomId,
+    this.extendCount = 0,
+    this.frozenAt,
+    this.completedAt,
   });
   final String id;
   final String code;
@@ -147,7 +164,24 @@ class Room {
   /// 마지막 입력(생성·입장·저장·기록 연결) 시각. 조회만으로는 바뀌지 않는다.
   final DateTime lastActivityAt;
 
-  DateTime get expiresAt => lastActivityAt.add(roomInactiveLimit);
+  /// 방장이 `방 연장`을 누른 횟수.
+  final int extendCount;
+
+  /// 방을 얼린 시각. 얼리지 않았으면 null.
+  final DateTime? frozenAt;
+
+  /// 정산을 완료한 시각. 완료하지 않았으면 null.
+  final DateTime? completedAt;
+
+  bool get isFrozen => frozenAt != null;
+  bool get isCompleted => completedAt != null;
+  int get extendsLeft => roomExtendLimit - extendCount;
+
+  /// 방이 삭제되는 시각. 완료 12시간 뒤, 얼린 지 7일 뒤, 그 외에는 마지막 입력 48시간 뒤.
+  DateTime get expiresAt =>
+      completedAt?.add(roomCompletedLimit) ??
+      frozenAt?.add(roomFreezeLimit) ??
+      lastActivityAt.add(roomInactiveLimit);
   bool isExpiredAt(DateTime now) => !now.isBefore(expiresAt);
   Duration remainingAt(DateTime now) {
     final left = expiresAt.difference(now);
@@ -184,6 +218,10 @@ class Room {
     List<Expense>? expenses,
     int? version,
     DateTime? lastActivityAt,
+    int? extendCount,
+    DateTime? frozenAt,
+    bool clearFrozen = false,
+    DateTime? completedAt,
   }) => Room(
     id: id,
     code: code,
@@ -194,6 +232,9 @@ class Room {
     version: version ?? this.version,
     lastActivityAt: lastActivityAt ?? this.lastActivityAt,
     sourceRoomId: sourceRoomId,
+    extendCount: extendCount ?? this.extendCount,
+    frozenAt: clearFrozen ? null : frozenAt ?? this.frozenAt,
+    completedAt: completedAt ?? this.completedAt,
   );
 
   Map<String, dynamic> toJson() => {
@@ -206,6 +247,9 @@ class Room {
     'version': version,
     'source_room_id': sourceRoomId,
     'last_activity_at': lastActivityAt.toUtc().toIso8601String(),
+    'extend_count': extendCount,
+    'frozen_at': frozenAt?.toUtc().toIso8601String(),
+    'completed_at': completedAt?.toUtc().toIso8601String(),
   };
 
   /// [fallbackActivity]는 이 필드가 생기기 전에 저장된 방에 쓰인다.
@@ -233,7 +277,12 @@ class Room {
         ? DateTime.parse(json['last_activity_at'] as String).toUtc()
         : (fallbackActivity ?? DateTime.now()).toUtc(),
     sourceRoomId: json['source_room_id'] as String?,
+    extendCount: (json['extend_count'] as num?)?.toInt() ?? 0,
+    frozenAt: _time(json['frozen_at']),
+    completedAt: _time(json['completed_at']),
   );
+  static DateTime? _time(Object? value) =>
+      value is String ? DateTime.parse(value).toUtc() : null;
   static Room decode(String source, {DateTime? fallbackActivity}) =>
       Room.fromJson(
         jsonDecode(source) as Map<String, dynamic>,
