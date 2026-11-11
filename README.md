@@ -2,7 +2,7 @@
 
 친구들과 쓴 비용을 각자의 메뉴에 맞게 나누고, 여러 결제자의 금액을 상계하는 Flutter 앱입니다. [기획서](docs/product-plan.md)의 **1단계 수동 입력 첫 버전**을 구현합니다.
 
-현재 포함된 흐름: 방 생성·코드 입장, 참여 중인 방 목록, 메뉴와 비용 수동 입력, 항목별 부담자 선택, 잔돈 부담자 직접 지정, 최종 송금 안내, 참여자의 정산 복제. 영수증·메뉴판 인식과 잔돈 추첨은 후속 단계입니다. 앱 내 송금 기능은 없습니다.
+현재 포함된 흐름: 방 생성·코드 입장, 참여 중인 방 목록, 메뉴와 비용 수동 입력, 항목별 부담자 선택, 잔돈 부담자 직접 지정, 최종 송금 안내, 참여자의 정산 복제, 48시간 동안 입력이 없는 방 자동 삭제(삭제까지 남은 시간 표시). 영수증·메뉴판 인식과 잔돈 추첨은 후속 단계입니다. 앱 내 송금 기능은 없습니다.
 
 ## 계획 중인 기능 (미구현)
 
@@ -30,7 +30,7 @@ flutter run
 ## 친구 기기와 연결하기
 
 1. Supabase 프로젝트를 만들고 **Anonymous Sign-Ins**를 활성화합니다.
-2. SQL Editor에서 [`supabase/migrations/202610020001_first_version.sql`](supabase/migrations/202610020001_first_version.sql)을 실행합니다.
+2. SQL Editor에서 [`supabase/migrations/202610020001_first_version.sql`](supabase/migrations/202610020001_first_version.sql), [`supabase/migrations/202611080001_room_expiry.sql`](supabase/migrations/202611080001_room_expiry.sql)을 순서대로 실행합니다. 두 번째 파일은 `pg_cron` 확장을 켜고 기한이 지난 방을 1시간마다 지우는 작업을 등록합니다. 확장 생성 권한 오류가 나면 Dashboard > Database > Extensions에서 `pg_cron`을 먼저 켠 뒤 다시 실행합니다.
 3. 프로젝트 URL과 **publishable key**를 아래처럼 빌드 인자로 넘깁니다.
 
 ```powershell

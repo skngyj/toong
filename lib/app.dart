@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
 
 import 'data/room_store.dart';
 import 'domain/models.dart';
@@ -62,7 +63,11 @@ class ToongApp extends StatelessWidget {
 
 Future<void> showFailure(BuildContext context, Object error) async {
   if (!context.mounted) return;
-  final message = error is StateError ? error.message : error.toString();
+  final message = switch (error) {
+    StateError(:final message) => message,
+    PostgrestException(:final message) => message,
+    _ => error.toString(),
+  };
   await showDialog<void>(
     context: context,
     builder: (context) => AlertDialog(
@@ -84,7 +89,7 @@ Future<bool> guestNotice(BuildContext context) async =>
       builder: (context) => AlertDialog(
         title: const Text('게스트 이용 안내'),
         content: const Text(
-          '앱을 삭제하거나 기기를 바꾸면 이 방의 참여자·방장 권한을 되찾지 못할 수 있어요. 방 코드와 닉네임만으로 기존 권한을 복구할 수 없습니다.',
+          '앱을 삭제하거나 기기를 바꾸면 이 방의 참여자·방장 권한을 되찾지 못할 수 있어요. 방 코드와 닉네임만으로 기존 권한을 복구할 수 없습니다.\n\n$roomExpiryNotice',
         ),
         actions: [
           TextButton(
@@ -306,7 +311,8 @@ class _RoomListPageState extends State<RoomListPage> {
                   child: ListTile(
                     title: Text(r.name),
                     subtitle: Text(
-                      '${r.members.length}명 · 지출 ${r.expenses.length}건',
+                      '${r.members.length}명 · 지출 ${r.expenses.length}건 · '
+                      '삭제까지 ${formatRemaining(r.remainingAt(DateTime.now()))}',
                     ),
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () => Navigator.push(
@@ -339,11 +345,16 @@ class _RoomPageState extends State<RoomPage> {
   String? actor;
   bool loading = true;
   Timer? timer;
+  Timer? ticker;
 
   @override
   void initState() {
     super.initState();
     refresh();
+    // 삭제까지 남은 시간 표시를 갱신한다.
+    ticker = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) setState(() {});
+    });
     if (widget.store.isCloud) {
       timer = Timer.periodic(
         const Duration(seconds: 10),
@@ -355,6 +366,7 @@ class _RoomPageState extends State<RoomPage> {
   @override
   void dispose() {
     timer?.cancel();
+    ticker?.cancel();
     super.dispose();
   }
 
@@ -421,7 +433,11 @@ class _RoomPageState extends State<RoomPage> {
   @override
   Widget build(BuildContext context) {
     final r = room;
-    final owner = r != null && actor != null && r.owns(actor!);
+    final now = DateTime.now();
+    final expired = r != null && r.isExpiredAt(now);
+    final isOwner = r != null && actor != null && r.owns(actor!);
+    // 기한이 지난 방은 삭제 작업 전이라도 수정·복제를 막는다.
+    final owner = isOwner && !expired;
     return Scaffold(
       appBar: AppBar(
         title: Text(r?.name ?? '방'),
@@ -480,6 +496,8 @@ class _RoomPageState extends State<RoomPage> {
                     ),
                   ),
                 ),
+                const SizedBox(height: 10),
+                _ExpiryCard(room: r, now: now),
                 const SizedBox(height: 10),
                 Wrap(
                   spacing: 8,
@@ -561,7 +579,8 @@ class _RoomPageState extends State<RoomPage> {
                     icon: const Icon(Icons.add),
                     label: const Text('지출 추가'),
                   ),
-                if (!owner) const Text('지출과 잔돈 부담자는 방장이 입력할 수 있어요.'),
+                if (!isOwner && !expired)
+                  const Text('지출과 잔돈 부담자는 방장이 입력할 수 있어요.'),
                 const SizedBox(height: 20),
                 if (r.pendingRemainder > 0)
                   Text(
@@ -586,7 +605,7 @@ class _RoomPageState extends State<RoomPage> {
                 ),
                 const SizedBox(height: 22),
                 TextButton.icon(
-                  onPressed: copyRoom,
+                  onPressed: expired ? null : copyRoom,
                   icon: const Icon(Icons.copy_all),
                   label: const Text('이 방의 정산 복제하기'),
                 ),
@@ -601,6 +620,57 @@ class _RoomPageState extends State<RoomPage> {
                   ),
               ],
             ),
+    );
+  }
+}
+
+class _ExpiryCard extends StatelessWidget {
+  const _ExpiryCard({required this.room, required this.now});
+  final Room room;
+  final DateTime now;
+
+  @override
+  Widget build(BuildContext context) {
+    final expired = room.isExpiredAt(now);
+    final remaining = room.remainingAt(now);
+    final urgent = !expired && remaining < const Duration(hours: 6);
+    return Card(
+      color: expired || urgent ? const Color(0xFFFFF1E6) : _soft,
+      elevation: 0,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              expired ? Icons.block : Icons.timer_outlined,
+              color: _ink,
+              size: 20,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    expired
+                        ? roomExpiredMessage
+                        : '삭제까지 ${formatRemaining(remaining)}',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    expired
+                        ? '더 이상 입력·복제할 수 없어요. 필요한 내용은 지금 확인해주세요.'
+                        : roomExpiryNotice,
+                    style: const TextStyle(fontSize: 13, color: Colors.black54),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
