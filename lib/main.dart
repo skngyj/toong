@@ -1,3 +1,4 @@
+import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -14,6 +15,8 @@ Future<void> main() async {
   }
   runApp(
     ToongApp(
+      // 방 링크(toong://join/코드)로 앱을 열었을 때의 주소를 받는다.
+      links: AppLinks().uriLinkStream,
       store: cloud
           ? CloudRoomStore(Supabase.instance.client)
           : LocalRoomStore(),
