@@ -2,11 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
 
 import 'data/record_store.dart';
 import 'data/room_store.dart';
 import 'domain/models.dart';
+import 'domain/receipt.dart';
 import 'domain/record.dart';
 import 'domain/settlement.dart';
 
@@ -1045,6 +1047,27 @@ class _ExpiryCard extends StatelessWidget {
   }
 }
 
+typedef PickedPhoto = ({Uint8List bytes, String mimeType});
+
+/// 영수증 사진을 찍거나 고른다. 긴 변을 1600px로 줄여 전송량과 인식 비용을 줄인다.
+/// 위젯 테스트에서 바꿔 끼울 수 있게 변수로 둔다.
+Future<PickedPhoto?> Function(ImageSource source) pickReceiptPhoto =
+    _pickWithImagePicker;
+
+Future<PickedPhoto?> _pickWithImagePicker(ImageSource source) async {
+  final file = await ImagePicker().pickImage(
+    source: source,
+    maxWidth: 1600,
+    maxHeight: 1600,
+    imageQuality: 80,
+  );
+  if (file == null) return null;
+  final mimeType =
+      file.mimeType ??
+      (file.name.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg');
+  return (bytes: await file.readAsBytes(), mimeType: mimeType);
+}
+
 class _ItemDraft {
   _ItemDraft({
     required this.id,
@@ -1086,6 +1109,10 @@ class _ExpensePageState extends State<ExpensePage> {
   final List<_ItemDraft> items = [];
   bool busy = false;
 
+  /// 마지막으로 읽은 영수증. 항목 합계와 영수증 총액을 비교해 보여준다.
+  ScannedReceipt? scanned;
+  bool scanning = false;
+
   @override
   void initState() {
     super.initState();
@@ -1116,6 +1143,73 @@ class _ExpensePageState extends State<ExpensePage> {
     }
     super.dispose();
   }
+
+  /// 영수증 사진을 읽어 항목을 채운다. 이미 입력한 항목이 있으면 바꿀지 먼저 묻는다.
+  Future<void> scan(ImageSource source) async {
+    final scanner = widget.store.receiptScanner;
+    if (scanner == null || scanning) return;
+    final hasInput = items.any(
+      (d) => d.name.text.trim().isNotEmpty || d.amount.text.trim().isNotEmpty,
+    );
+    if (hasInput) {
+      final replace = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('입력한 항목을 바꿀까요?'),
+          content: const Text('영수증에서 읽은 메뉴로 지금 항목을 모두 바꿉니다.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('취소'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('바꾸기'),
+            ),
+          ],
+        ),
+      );
+      if (replace != true || !mounted) return;
+    }
+    final photo = await pickReceiptPhoto(source);
+    if (photo == null || !mounted) return;
+    setState(() => scanning = true);
+    try {
+      final receipt = await scanner.scan(photo.bytes, mimeType: photo.mimeType);
+      if (!mounted) return;
+      setState(() {
+        for (final draft in items) {
+          draft.dispose();
+        }
+        items
+          ..clear()
+          ..addAll(
+            receipt.toLines().map(
+              (line) => _ItemDraft(
+                id: newId(),
+                name: line.name,
+                amount: line.amount,
+                memberIds: {},
+              ),
+            ),
+          );
+        if (title.text.trim().isEmpty && receipt.storeName != null) {
+          title.text = receipt.storeName!;
+        }
+        scanned = receipt;
+      });
+    } catch (error) {
+      if (mounted) await showFailure(context, error);
+    } finally {
+      if (mounted) setState(() => scanning = false);
+    }
+  }
+
+  /// 지금 입력된 항목 금액의 합. 숫자가 아닌 칸은 0으로 본다.
+  int get draftTotal => items.fold(
+    0,
+    (sum, d) => sum + (int.tryParse(d.amount.text.replaceAll(',', '')) ?? 0),
+  );
 
   Future<void> save() async {
     if (title.text.trim().isEmpty || items.isEmpty) {
@@ -1185,7 +1279,56 @@ class _ExpensePageState extends State<ExpensePage> {
     body: ListView(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
       children: [
-        const Text('메뉴와 금액을 직접 입력해주세요.'),
+        if (widget.store.receiptScanner == null)
+          const Text('메뉴와 금액을 직접 입력해주세요.')
+        else ...[
+          const Text('영수증을 찍거나, 메뉴와 금액을 직접 입력해주세요.'),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: scanning ? null : () => scan(ImageSource.camera),
+                  icon: const Icon(Icons.photo_camera_outlined),
+                  label: const Text('영수증 촬영'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: scanning ? null : () => scan(ImageSource.gallery),
+                  icon: const Icon(Icons.photo_library_outlined),
+                  label: const Text('사진 선택'),
+                ),
+              ),
+            ],
+          ),
+          if (scanning)
+            const Padding(
+              padding: EdgeInsets.only(top: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  LinearProgressIndicator(),
+                  SizedBox(height: 6),
+                  Text('영수증을 읽는 중이에요…'),
+                ],
+              ),
+            ),
+          if (scanned != null && !scanning)
+            _ScanSummary(
+              receipt: scanned!,
+              currentTotal: draftTotal,
+              onSelectAll: () => setState(() {
+                for (final draft in items) {
+                  draft.memberIds
+                    ..clear()
+                    ..addAll(widget.room.members.map((m) => m.id));
+                  draft.remainderMemberId = null;
+                }
+              }),
+            ),
+        ],
         const SizedBox(height: 18),
         TextField(
           controller: title,
@@ -1264,6 +1407,8 @@ class _ExpensePageState extends State<ExpensePage> {
             const SizedBox(height: 12),
             TextField(
               controller: item.amount,
+              // 영수증 총액과의 차이 표시를 바로 갱신한다.
+              onChanged: (_) => setState(() {}),
               keyboardType: TextInputType.number,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               decoration: const InputDecoration(
@@ -1293,6 +1438,72 @@ class _ExpensePageState extends State<ExpensePage> {
                     ),
                   )
                   .toList(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 영수증 인식 결과 요약: 읽은 메뉴 수, 반영한 할인, 영수증 총액과의 차이.
+class _ScanSummary extends StatelessWidget {
+  const _ScanSummary({
+    required this.receipt,
+    required this.currentTotal,
+    required this.onSelectAll,
+  });
+  final ScannedReceipt receipt;
+
+  /// 지금 입력된 항목 금액의 합. 사용자가 고치면 바뀐다.
+  final int currentTotal;
+  final VoidCallback onSelectAll;
+
+  @override
+  Widget build(BuildContext context) {
+    final total = receipt.total;
+    final gap = total == null ? null : total - currentTotal;
+    final discount = receipt.discountTotal;
+    final names = receipt.discounts.map((d) => d.name).join(', ');
+    final (warn, check) = switch (gap) {
+      null => (true, '영수증 총액을 읽지 못했어요. 금액을 확인해주세요.'),
+      0 => (false, '항목 합계가 영수증 총액 ${money(total!)}과 같아요.'),
+      > 0 => (
+        true,
+        '항목 합계가 영수증 총액 ${money(total!)}보다 ${money(gap)} 적어요. 빠진 메뉴가 없는지 확인해주세요.',
+      ),
+      _ => (
+        true,
+        '항목 합계가 영수증 총액 ${money(total!)}보다 ${money(-gap)} 많아요. 금액을 확인해주세요.',
+      ),
+    };
+    return Card(
+      margin: const EdgeInsets.only(top: 12),
+      color: warn ? const Color(0xFFFFF1E6) : _soft,
+      elevation: 0,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '영수증에서 메뉴 ${receipt.items.length}개를 읽었어요.',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            if (discount > 0 && discount < receipt.itemsTotal)
+              Text('할인 ${money(discount)}($names)을 메뉴 금액에 비율대로 나눠 반영했어요.'),
+            if (discount > 0 && discount >= receipt.itemsTotal)
+              Text('할인 ${money(discount)}이 메뉴 합보다 커서 반영하지 않았어요.'),
+            Text(check),
+            const SizedBox(height: 4),
+            const Text(
+              '인식 결과가 틀릴 수 있어요. 항목을 확인하고 먹은 사람을 골라주세요.',
+              style: TextStyle(fontSize: 13, color: Colors.black54),
+            ),
+            TextButton.icon(
+              onPressed: onSelectAll,
+              icon: const Icon(Icons.group_outlined),
+              label: const Text('모든 항목에 모두 선택'),
             ),
           ],
         ),
