@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../domain/models.dart';
+import 'receipt_scanner.dart';
 
 String newId() {
   final random = Random.secure();
@@ -13,6 +14,9 @@ String newId() {
 
 abstract class RoomStore {
   bool get isCloud;
+
+  /// 영수증 인식. 서버가 연결된 경우에만 있고, 체험 모드에서는 null이다.
+  ReceiptScanner? get receiptScanner;
   Future<String> actorId();
   Future<List<Room>> listRooms();
   Future<Room> createRoom(String name, String nickname);
@@ -39,8 +43,13 @@ abstract class RoomStore {
 ///
 /// 기한이 지난 방은 즉시 입장·수정·복제를 막고, 방 목록을 불러올 때 실제로 지운다.
 class LocalRoomStore implements RoomStore {
-  LocalRoomStore({DateTime Function()? clock}) : _clock = clock ?? DateTime.now;
+  LocalRoomStore({DateTime Function()? clock, this.receiptScanner})
+    : _clock = clock ?? DateTime.now;
   final DateTime Function() _clock;
+
+  /// 체험 모드에는 서버가 없어 기본값은 null이다. 테스트에서만 넣는다.
+  @override
+  final ReceiptScanner? receiptScanner;
 
   DateTime get _now => _clock().toUtc();
 
@@ -337,10 +346,12 @@ class LocalRoomStore implements RoomStore {
 }
 
 class CloudRoomStore implements RoomStore {
-  CloudRoomStore(this.client);
+  CloudRoomStore(this.client) : receiptScanner = CloudReceiptScanner(client);
   final SupabaseClient client;
   @override
   bool get isCloud => true;
+  @override
+  final ReceiptScanner receiptScanner;
 
   Future<void> _signIn() async {
     if (client.auth.currentUser == null) {

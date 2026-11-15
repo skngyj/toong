@@ -1,8 +1,8 @@
 # 퉁 (Toong)
 
-친구들과 쓴 비용을 각자의 메뉴에 맞게 나누고, 여러 결제자의 금액을 상계하는 Flutter 앱입니다. [기획서](docs/product-plan.md)의 **1단계 수동 입력 첫 버전**을 구현합니다.
+친구들과 쓴 비용을 각자의 메뉴에 맞게 나누고, 여러 결제자의 금액을 상계하는 Flutter 앱입니다. 1~3주차 목표(수동 입력 정산, 방 코드·링크 입장, 방 보관 규칙, 영수증 인식)를 구현했습니다. 주차별 목표는 [기획서](docs/product-plan.md) 14장에 있습니다.
 
-현재 포함된 흐름: 방 생성·코드 입장, 방 링크 입장, 참여 중인 방 목록, 메뉴와 비용 수동 입력, 항목별 부담자 선택, 잔돈 부담자 직접 지정, 최종 송금 안내, 참여자의 정산 복제, 방 자동 삭제·연장·얼리기, 정산 완료와 기기 저장 기록. 영수증·메뉴판 인식과 잔돈 추첨은 후속 단계입니다. 앱 내 송금 기능은 없습니다.
+현재 포함된 흐름: 방 생성·코드 입장, 방 링크 입장, 참여 중인 방 목록, 메뉴와 비용 수동 입력, 항목별 부담자 선택, 잔돈 부담자 직접 지정, 최종 송금 안내, 참여자의 정산 복제, 방 자동 삭제·연장·얼리기, 정산 완료와 기기 저장 기록, 영수증 사진 인식(Gemini). 메뉴판 인식과 잔돈 추첨은 4주차 예정입니다. 앱 내 송금 기능은 없습니다.
 
 ## 방 보관 규칙
 
@@ -18,6 +18,18 @@
 
 방 링크는 앱 전용 주소라서 앱이 설치된 기기에서만 열립니다. 메신저에 따라 눌리는 링크로 보이지 않을 수 있으니 방 코드를 함께 알려주세요.
 
+## 계획 중인 부가 금전 기능 (미구현)
+
+정산 뒤의 돈 관리까지 이어가는 기능입니다. 모두 각자 기기에만 저장합니다. 자세한 내용은 [기획서](docs/product-plan.md) 6.9절에 있습니다.
+
+| 기능 | 내용 | 예정 |
+| --- | --- | --- |
+| 개인 가계부 | 정산 완료 시 내 부담액 자동 기록, 직접 기록, 월별·분류별 합계 | 4주차 |
+| 월 예산 알림 | 이번 달 사용액이 예산의 80%·100%를 넘으면 알림 | 4주차 |
+| 송금 관리 | `보냈어요`·`받았어요` 표시, 아직 주고받지 않은 돈 모아보기 | 5주차 |
+| 계좌 복사·송금 앱 열기 | 받을 사람의 계좌를 금액과 함께 복사하고 송금 앱을 바로 열기. 앱 안에서 송금하지는 않음 | 5주차 |
+| 정기 구독 정산 | 넷플릭스 같은 공유 구독을 등록하면 매달 결제일에 "누구에게 얼마 보낼지"·"누구에게 얼마 받을지" 알림 | 5주차 |
+
 ## 실행
 
 Flutter SDK가 설치되어 있다면:
@@ -32,7 +44,7 @@ flutter run
 ## 친구 기기와 연결하기
 
 1. Supabase 프로젝트를 만들고 **Anonymous Sign-Ins**를 활성화합니다.
-2. SQL Editor에서 [`supabase/migrations/202610020001_first_version.sql`](supabase/migrations/202610020001_first_version.sql), [`supabase/migrations/202611080001_room_expiry.sql`](supabase/migrations/202611080001_room_expiry.sql), [`supabase/migrations/202611110001_room_lifecycle.sql`](supabase/migrations/202611110001_room_lifecycle.sql)을 순서대로 실행합니다. 두 번째 파일은 `pg_cron` 확장을 켜고 기한이 지난 방을 1시간마다 지우는 작업을 등록합니다. 세 번째 파일은 방 연장·얼리기·정산 완료 함수와, 방이 없는 익명 사용자를 하루 한 번 지우는 작업을 추가합니다. 확장 생성 권한 오류가 나면 Dashboard > Database > Extensions에서 `pg_cron`을 먼저 켠 뒤 다시 실행합니다.
+2. SQL Editor에서 [`supabase/migrations/202610020001_first_version.sql`](supabase/migrations/202610020001_first_version.sql), [`supabase/migrations/202611080001_room_expiry.sql`](supabase/migrations/202611080001_room_expiry.sql), [`supabase/migrations/202611110001_room_lifecycle.sql`](supabase/migrations/202611110001_room_lifecycle.sql), [`supabase/migrations/202611150001_receipt_scan.sql`](supabase/migrations/202611150001_receipt_scan.sql)을 순서대로 실행합니다. 두 번째 파일은 `pg_cron` 확장을 켜고 기한이 지난 방을 1시간마다 지우는 작업을 등록합니다. 세 번째 파일은 방 연장·얼리기·정산 완료 함수와, 방이 없는 익명 사용자를 하루 한 번 지우는 작업을 추가합니다. 네 번째 파일은 영수증 인식의 사용자별 하루 호출 횟수(20회)를 셉니다. 확장 생성 권한 오류가 나면 Dashboard > Database > Extensions에서 `pg_cron`을 먼저 켠 뒤 다시 실행합니다.
 3. 프로젝트 URL과 **publishable key**를 아래처럼 빌드 인자로 넘깁니다.
 
 ```powershell
@@ -43,11 +55,43 @@ flutter run --dart-define=SUPABASE_URL=https://YOUR_PROJECT.supabase.co --dart-d
 
 서버에서는 익명 인증 사용자에게만 방 생성·참여 함수를 허용하고, 방 데이터 조회를 실제 참여자에게 제한합니다. 방장만 지출·잔돈 부담자를 수정하며, 다른 참여자도 읽을 수 있는 원본 방을 복제해 새 방장이 될 수 있습니다. 복제본의 미연결 과거 참여자 금액은 유지됩니다.
 
+## 영수증 인식 켜기 (Gemini)
+
+영수증 인식은 Supabase Edge Function [`scan-receipt`](supabase/functions/scan-receipt/index.ts)가 Gemini API를 호출해 처리합니다. 앱에는 Gemini 키가 들어가지 않습니다. 체험 모드에서는 영수증 버튼이 보이지 않습니다.
+
+1. [Google AI Studio](https://aistudio.google.com)에서 Gemini API 키를 만듭니다.
+2. [Supabase CLI](https://supabase.com/docs/guides/cli)로 프로젝트에 연결한 뒤 키를 함수의 비밀 값으로 등록하고 함수를 배포합니다.
+
+```bash
+supabase link --project-ref YOUR_PROJECT_REF
+```
+
+```bash
+supabase secrets set GEMINI_API_KEY=YOUR_GEMINI_API_KEY
+```
+
+```bash
+supabase functions deploy scan-receipt
+```
+
+3. 위 네 번째 마이그레이션(`202611150001_receipt_scan.sql`)을 실행했는지 확인합니다. 하루 호출 횟수를 이 테이블에서 셉니다.
+
+- 기본 모델은 `gemini-3.5-flash-lite`입니다. 바꾸려면 `supabase secrets set GEMINI_MODEL=모델이름`을 설정합니다.
+- 함수는 JWT 검증을 켠 기본 설정으로 배포합니다. 앱의 익명 로그인 사용자만 호출할 수 있습니다.
+- 사진과 인식 결과는 저장하지 않고, 사용자별 하루 호출 횟수만 저장합니다. 한 사람당 하루 20회까지입니다.
+- Gemini API 무료 등급은 하루 한도가 있고, 보낸 내용이 Google의 서비스 개선에 쓰일 수 있습니다. 실제 사용자 사진을 보내기 전에 Google AI Studio의 약관과 한도를 확인하세요.
+
 ## 확인
 
 ```powershell
 dart analyze lib test
 flutter test
+```
+
+영수증 인식 서버 함수의 순수 로직은 Node 22 이상으로 테스트합니다.
+
+```bash
+node --experimental-strip-types --test supabase/functions/scan-receipt/receipt.test.ts
 ```
 
 Android 실행·APK 빌드에는 Android SDK가 필요합니다. 이 저장소에는 Android와 iOS 프로젝트가 생성되어 있지만, iOS 빌드에는 macOS/Xcode가 필요합니다. 앱 식별자와 아이콘은 배포 전에 정해야 합니다.
