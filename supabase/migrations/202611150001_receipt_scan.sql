@@ -1,4 +1,4 @@
--- 3주차 영수증 인식(scan-receipt Edge Function)의 하루 사용 횟수.
+-- 2주차 영수증 인식(scan-receipt Edge Function)의 하루 사용 횟수.
 -- Run after 202611110001_room_lifecycle.sql.
 --
 -- 서버에는 사용자별 하루 호출 횟수만 저장한다. 사진과 인식 결과는 저장하지 않는다.
