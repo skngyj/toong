@@ -1,0 +1,79 @@
+# main에 합칠 때마다 Android APK를 만들어 GitHub Releases에 올린다.
+# 휴대폰 브라우저에서 Releases의 app-release.apk를 받아 설치하면 된다.
+#
+# 필요한 저장소 Secrets (Settings > Secrets and variables > Actions):
+#   SUPABASE_URL              예: https://xxxx.supabase.co
+#   SUPABASE_PUBLISHABLE_KEY  예: sb_publishable_...
+# 둘 다 앱에 들어가도 되는 공개용 값이다. secret key나 Gemini 키는 넣지 않는다.
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Supabase secrets
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_PUBLISHABLE_KEY" ]; then
+            echo "::error::SUPABASE_URL과 SUPABASE_PUBLISHABLE_KEY를 저장소 Secrets에 넣어주세요. 없으면 영수증 인식이 없는 체험 모드 앱이 만들어집니다."
+            exit 1
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.3
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - name: Test
+        run: |
+          dart analyze lib test
+          flutter test
+
+      - name: Build APK
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          flutter build apk --release \
+            --build-number=${{ github.run_number }} \
+            --dart-define=SUPABASE_URL="$SUPABASE_URL" \
+            --dart-define=SUPABASE_PUBLISHABLE_KEY="$SUPABASE_PUBLISHABLE_KEY"
+          cp build/app/outputs/flutter-apk/app-release.apk toong.apk
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: 퉁 앱 빌드 ${{ github.run_number }}
+          body: |
+            커밋 ${{ github.sha }} 기준 Android APK입니다.
+
+            설치 방법: 휴대폰 브라우저에서 아래 toong.apk를 받아 엽니다. 처음이면 "출처를 알 수 없는 앱 설치"를 허용합니다.
+            이전 빌드가 설치되어 있으면 먼저 지운 뒤 설치하세요(빌드마다 서명이 달라 덮어쓰기 설치가 안 됩니다).
+          files: toong.apk
+          make_latest: true

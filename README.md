@@ -41,6 +41,16 @@ flutter run
 
 서버 정보 없이 실행하면 **체험 모드**입니다. 방과 지출은 실행 기기에만 저장되고, 같은 기기에서만 방 코드 입장이 가능합니다. 앱 삭제·데이터 초기화 시 저장 내용이 사라질 수 있습니다. 친구의 다른 기기와 연결하려면 아래 Supabase 설정이 필요합니다.
 
+## 휴대폰에 설치하기 (Android)
+
+`main`에 합칠 때마다 GitHub Actions([`android-apk.yml`](.github/workflows/android-apk.yml))가 테스트를 돌리고 APK를 만들어 [Releases](https://github.com/skngyj/toong/releases)에 올립니다.
+
+1. 저장소 Settings → Secrets and variables → Actions → **New repository secret**에 `SUPABASE_URL`과 `SUPABASE_PUBLISHABLE_KEY`를 넣습니다. 처음 한 번만 하면 됩니다.
+2. 휴대폰 브라우저에서 Releases의 최신 빌드를 열고 `toong.apk`를 받아 설치합니다. 처음이면 "출처를 알 수 없는 앱 설치"를 허용합니다.
+3. 새 빌드를 설치할 때는 이전 앱을 먼저 지웁니다. 아직 고정 서명 키가 없어 빌드마다 서명이 달라 덮어쓰기 설치가 되지 않습니다.
+
+Actions 탭의 **Android APK → Run workflow**로 직접 빌드할 수도 있습니다.
+
 ## 친구 기기와 연결하기
 
 1. Supabase 프로젝트를 만들고 **Anonymous Sign-Ins**를 활성화합니다.
