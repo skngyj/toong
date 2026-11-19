@@ -37,6 +37,9 @@ abstract class RoomStore {
 
   /// 정산을 완료한다. 방은 [roomCompletedLimit] 뒤 삭제된다.
   Future<Room> completeRoom(Room room);
+
+  /// 방을 바로 삭제한다. 방장만 할 수 있다.
+  Future<void> deleteRoom(Room room);
 }
 
 /// 체험 모드 저장소. 서버와 같은 48시간 규칙을 기기 안에서 적용한다.
@@ -134,6 +137,17 @@ class LocalRoomStore implements RoomStore {
     }
     return current.copyWith(completedAt: _now);
   });
+
+  @override
+  Future<void> deleteRoom(Room room) async {
+    final rooms = await _all();
+    final current = rooms.where((r) => r.id == room.id).firstOrNull;
+    if (current == null) return;
+    if (!current.owns(await actorId())) {
+      throw StateError('방장만 방을 삭제할 수 있어요.');
+    }
+    await _write(rooms.where((r) => r.id != room.id).toList());
+  }
 
   @override
   Future<String> actorId() async {
@@ -428,6 +442,12 @@ class CloudRoomStore implements RoomStore {
   @override
   Future<Room> completeRoom(Room room) =>
       _roomAction('complete_toong_room', room);
+
+  @override
+  Future<void> deleteRoom(Room room) async {
+    await _signIn();
+    await client.rpc('delete_toong_room', params: {'p_room_id': room.id});
+  }
 
   @override
   Future<Room> getRoom(String id) async {

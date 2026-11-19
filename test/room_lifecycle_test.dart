@@ -292,4 +292,13 @@ void main() {
     expect(codeFromLink(Uri.parse('toong://other/ABC2345')), isNull);
     expect(codeFromLink(Uri.parse('https://join/ABC2345')), isNull);
   });
+
+  test('방장이 아니면 방을 삭제할 수 없다', () async {
+    SharedPreferences.setMockInitialValues({});
+    final store = LocalRoomStore();
+    final room = await store.createRoom('모임', '민수');
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('toong_actor_id', 'someone-else');
+    expect(() => store.deleteRoom(room), throwsA(isA<StateError>()));
+  });
 }

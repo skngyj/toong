@@ -21,7 +21,7 @@ void main() {
     expect(find.text('게스트 이용 안내'), findsOneWidget);
     expect(find.textContaining('기기를 바꾸면'), findsOneWidget);
     expect(find.textContaining('48시간 동안 입력이 없으면'), findsOneWidget);
-    await tester.tap(find.text('확인했어요'));
+    await tester.tap(find.text('확인'));
     await tester.pumpAndSettle();
     expect(find.byType(TextFormField), findsNWidgets(2));
   });
@@ -31,7 +31,7 @@ void main() {
     await tester.pumpWidget(ToongApp(store: LocalRoomStore()));
     await tester.tap(find.text('새방 만들기'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('확인했어요'));
+    await tester.tap(find.text('확인'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextFormField).at(0), '저녁 모임');
     await tester.enterText(find.byType(TextFormField).at(1), '민수');
@@ -73,7 +73,7 @@ void main() {
   Future<void> roomWithExpense(WidgetTester tester) async {
     await tester.tap(find.text('새방 만들기'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('확인했어요'));
+    await tester.tap(find.text('확인'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextFormField).at(0), '저녁 모임');
     await tester.enterText(find.byType(TextFormField).at(1), '민수');
@@ -122,7 +122,7 @@ void main() {
     await tester.tap(find.text('얼리기'));
     await tester.pumpAndSettle();
     expect(find.text('방을 얼릴까요?'), findsOneWidget);
-    await tester.tap(find.widgetWithText(FilledButton, '얼리기'));
+    await tester.tap(find.widgetWithText(FilledButton, '확인'));
     await tester.pumpAndSettle();
     expect(find.textContaining('얼린 방 · 삭제까지'), findsOneWidget);
     expect(find.text('지출 추가'), findsNothing);
@@ -153,7 +153,7 @@ void main() {
     await tester.tap(find.text('정산 완료'));
     await tester.pumpAndSettle();
     expect(find.text('정산을 완료할까요?'), findsOneWidget);
-    await tester.tap(find.widgetWithText(FilledButton, '정산 완료'));
+    await tester.tap(find.widgetWithText(FilledButton, '확인'));
     await tester.pumpAndSettle();
     expect(find.text('지출 추가'), findsNothing);
     expect(find.text('정산 기록 보기'), findsOneWidget);
@@ -193,7 +193,7 @@ void main() {
     links.add(Uri.parse(roomLink(room.code)));
     await tester.pumpAndSettle();
     expect(find.text('게스트 이용 안내'), findsOneWidget);
-    await tester.tap(find.text('확인했어요'));
+    await tester.tap(find.text('확인'));
     await tester.pumpAndSettle();
     expect(find.widgetWithText(TextFormField, room.code), findsOneWidget);
     await tester.enterText(find.byType(TextFormField).at(1), '민수');
@@ -209,5 +209,50 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('게스트 이용 안내'), findsNothing);
     expect(find.text('친구 방'), findsOneWidget);
+  });
+
+  testWidgets('확인·취소는 같은 크기로 좌우에 있고 취소는 빨간 버튼이다', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(ToongApp(store: LocalRoomStore()));
+    await tester.tap(find.text('새방 만들기'));
+    await tester.pumpAndSettle();
+    final cancel = find.widgetWithText(FilledButton, '취소');
+    final ok = find.widgetWithText(FilledButton, '확인');
+    expect(tester.getSize(cancel), tester.getSize(ok));
+    expect(tester.getCenter(cancel).dy, tester.getCenter(ok).dy);
+    expect(tester.getCenter(cancel).dx, lessThan(tester.getCenter(ok).dx));
+    final style = tester.widget<FilledButton>(cancel).style!;
+    expect(style.foregroundColor!.resolve({}), Colors.white);
+    expect(style.backgroundColor!.resolve({}), isNot(Colors.white));
+    await tester.tap(cancel);
+    await tester.pumpAndSettle();
+    expect(find.text('게스트 이용 안내'), findsNothing);
+    expect(find.byType(TextFormField), findsNothing);
+  });
+
+  testWidgets('방장은 참여중인 방 목록에서 방을 삭제할 수 있다', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final store = LocalRoomStore();
+    await store.createRoom('내 방', '민수');
+    await tester.pumpWidget(MaterialApp(home: RoomListPage(store: store)));
+    await tester.pumpAndSettle();
+    expect(find.text('내 방'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('방 삭제'));
+    await tester.pumpAndSettle();
+    expect(find.text('방을 삭제할까요?'), findsOneWidget);
+    await tester.tap(find.text('취소'));
+    await tester.pumpAndSettle();
+    expect(find.text('내 방'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('방 삭제'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('확인'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    expect(find.text('방을 삭제했어요.'), findsOneWidget);
+    expect(find.text('내 방'), findsNothing);
+    expect(await store.listRooms(), isEmpty);
   });
 }

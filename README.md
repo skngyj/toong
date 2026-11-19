@@ -54,7 +54,7 @@ Actions 탭의 **Android APK → Run workflow**로 직접 빌드할 수도 있�
 ## 친구 기기와 연결하기
 
 1. Supabase 프로젝트를 만들고 **Anonymous Sign-Ins**를 활성화합니다.
-2. SQL Editor에서 [`supabase/migrations/202610020001_first_version.sql`](supabase/migrations/202610020001_first_version.sql), [`supabase/migrations/202611080001_room_expiry.sql`](supabase/migrations/202611080001_room_expiry.sql), [`supabase/migrations/202611110001_room_lifecycle.sql`](supabase/migrations/202611110001_room_lifecycle.sql), [`supabase/migrations/202611150001_receipt_scan.sql`](supabase/migrations/202611150001_receipt_scan.sql)을 순서대로 실행합니다. 두 번째 파일은 `pg_cron` 확장을 켜고 기한이 지난 방을 1시간마다 지우는 작업을 등록합니다. 세 번째 파일은 방 연장·얼리기·정산 완료 함수와, 방이 없는 익명 사용자를 하루 한 번 지우는 작업을 추가합니다. 네 번째 파일은 영수증 인식의 사용자별 하루 호출 횟수(20회)를 셉니다. 확장 생성 권한 오류가 나면 Dashboard > Database > Extensions에서 `pg_cron`을 먼저 켠 뒤 다시 실행합니다.
+2. SQL Editor에서 [`supabase/migrations/202610020001_first_version.sql`](supabase/migrations/202610020001_first_version.sql), [`supabase/migrations/202611080001_room_expiry.sql`](supabase/migrations/202611080001_room_expiry.sql), [`supabase/migrations/202611110001_room_lifecycle.sql`](supabase/migrations/202611110001_room_lifecycle.sql), [`supabase/migrations/202611150001_receipt_scan.sql`](supabase/migrations/202611150001_receipt_scan.sql), [`supabase/migrations/202611190001_delete_room.sql`](supabase/migrations/202611190001_delete_room.sql)을 순서대로 실행합니다. 두 번째 파일은 `pg_cron` 확장을 켜고 기한이 지난 방을 1시간마다 지우는 작업을 등록합니다. 세 번째 파일은 방 연장·얼리기·정산 완료 함수와, 방이 없는 익명 사용자를 하루 한 번 지우는 작업을 추가합니다. 네 번째 파일은 영수증 인식의 사용자별 하루 호출 횟수(20회)를 셉니다. 다섯 번째 파일은 방장이 방을 바로 삭제하는 함수를 추가합니다. 확장 생성 권한 오류가 나면 Dashboard > Database > Extensions에서 `pg_cron`을 먼저 켠 뒤 다시 실행합니다.
 3. 프로젝트 URL과 **publishable key**를 아래처럼 빌드 인자로 넘깁니다.
 
 ```powershell
