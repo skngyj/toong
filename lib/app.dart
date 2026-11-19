@@ -16,6 +16,7 @@ const _ink = Color(0xFF213025);
 const _lime = Color(0xFFC8EE7D);
 const _canvas = Color(0xFFF6F8F3);
 const _soft = Color(0xFFECF1E6);
+const _danger = Color(0xFFE5484D);
 
 String money(int value) =>
     '${value.toString().replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => ',')}원';
@@ -124,6 +125,45 @@ class _ToongAppState extends State<ToongApp> {
   );
 }
 
+/// 확인·취소를 묻는 창. 두 버튼은 같은 크기로 좌우에 놓고, 취소는 빨간 버튼이다.
+Future<bool> askConfirm(
+  BuildContext context, {
+  required Widget title,
+  required Widget content,
+}) async =>
+    await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: title,
+        content: content,
+        actions: [dialogButtons(context)],
+      ),
+    ) ??
+    false;
+
+/// 창 아래의 "취소 / 확인" 버튼 한 줄. 취소는 false, 확인은 true를 돌려주며 닫는다.
+Widget dialogButtons(BuildContext context) => Row(
+  children: [
+    Expanded(
+      child: FilledButton(
+        style: FilledButton.styleFrom(
+          backgroundColor: _danger,
+          foregroundColor: Colors.white,
+        ),
+        onPressed: () => Navigator.pop(context, false),
+        child: const Text('취소'),
+      ),
+    ),
+    const SizedBox(width: 12),
+    Expanded(
+      child: FilledButton(
+        onPressed: () => Navigator.pop(context, true),
+        child: const Text('확인'),
+      ),
+    ),
+  ],
+);
+
 Future<void> showFailure(BuildContext context, Object error) async {
   if (!context.mounted) return;
   final message = switch (error) {
@@ -137,7 +177,7 @@ Future<void> showFailure(BuildContext context, Object error) async {
       title: const Text('진행할 수 없어요'),
       content: Text(message),
       actions: [
-        TextButton(
+        FilledButton(
           onPressed: () => Navigator.pop(context),
           child: const Text('확인'),
         ),
@@ -146,27 +186,13 @@ Future<void> showFailure(BuildContext context, Object error) async {
   );
 }
 
-Future<bool> guestNotice(BuildContext context) async =>
-    await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('게스트 이용 안내'),
-        content: const Text(
-          '앱을 삭제하거나 기기를 바꾸면 이 방의 참여자·방장 권한을 되찾지 못할 수 있어요. 방 코드와 닉네임만으로 기존 권한을 복구할 수 없습니다.\n\n$roomExpiryNotice',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('취소'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('확인했어요'),
-          ),
-        ],
-      ),
-    ) ??
-    false;
+Future<bool> guestNotice(BuildContext context) async => await askConfirm(
+  context,
+  title: const Text('게스트 이용 안내'),
+  content: const Text(
+    '앱을 삭제하거나 기기를 바꾸면 이 방의 참여자·방장 권한을 되찾지 못할 수 있어요. 방 코드와 닉네임만으로 기존 권한을 복구할 수 없습니다.\n\n$roomExpiryNotice',
+  ),
+);
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key, required this.store});
@@ -353,7 +379,10 @@ class RoomListPage extends StatefulWidget {
 }
 
 class _RoomListPageState extends State<RoomListPage> {
-  late Future<({List<Room> rooms, List<SettlementRecord> records})> future;
+  late Future<
+    ({List<Room> rooms, List<SettlementRecord> records, String actor})
+  >
+  future;
   @override
   void initState() {
     super.initState();
@@ -362,7 +391,8 @@ class _RoomListPageState extends State<RoomListPage> {
 
   /// 진행 중인 방과 이 기기에 저장된 완료 기록을 함께 불러온다.
   /// 완료된 방은 서버에서 지워지기 전에 기록으로 저장해 둔다.
-  Future<({List<Room> rooms, List<SettlementRecord> records})> load() async {
+  Future<({List<Room> rooms, List<SettlementRecord> records, String actor})>
+  load() async {
     final records = RecordStore();
     final rooms = await widget.store.listRooms();
     for (final room in rooms) {
@@ -371,12 +401,37 @@ class _RoomListPageState extends State<RoomListPage> {
     return (
       rooms: rooms.where((r) => !r.isCompleted).toList(),
       records: await records.list(),
+      actor: await widget.store.actorId(),
     );
+  }
+
+  /// 방장이 방을 바로 삭제한다. 참여자 모두의 목록에서 사라진다.
+  Future<void> delete(Room room) async {
+    final accepted = await askConfirm(
+      context,
+      title: const Text('방을 삭제할까요?'),
+      content: Text('「${room.name}」 방과 지출 내역이 모든 참여자에게서 사라져요. 되돌릴 수 없습니다.'),
+    );
+    if (!accepted || !mounted) return;
+    try {
+      await widget.store.deleteRoom(room);
+      if (!mounted) return;
+      setState(() {
+        future = load();
+      });
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('방을 삭제했어요.')));
+    } catch (error) {
+      if (mounted) await showFailure(context, error);
+    }
   }
 
   Future<void> open(Widget page) async {
     await Navigator.push(context, MaterialPageRoute(builder: (_) => page));
-    if (mounted) setState(() => future = load());
+    if (!mounted) return;
+    setState(() {
+      future = load();
+    });
   }
 
   @override
@@ -391,7 +446,7 @@ class _RoomListPageState extends State<RoomListPage> {
         if (!snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
-        final (:rooms, :records) = snapshot.data!;
+        final (:rooms, :records, :actor) = snapshot.data!;
         if (rooms.isEmpty && records.isEmpty) {
           return const Center(child: Text('아직 참여한 방이 없어요.'));
         }
@@ -410,7 +465,13 @@ class _RoomListPageState extends State<RoomListPage> {
                     '${r.isFrozen ? '얼림 · ' : ''}'
                     '삭제까지 ${formatRemaining(r.remainingAt(now))}',
                   ),
-                  trailing: const Icon(Icons.chevron_right),
+                  trailing: r.owns(actor)
+                      ? IconButton(
+                          icon: const Icon(Icons.delete_outline),
+                          tooltip: '방 삭제',
+                          onPressed: () => delete(r),
+                        )
+                      : const Icon(Icons.chevron_right),
                   onTap: () =>
                       open(RoomPage(store: widget.store, roomId: r.id)),
                 ),
@@ -464,22 +525,10 @@ class RecordPage extends StatelessWidget {
   final SettlementRecord record;
 
   Future<void> remove(BuildContext context) async {
-    final accepted = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('기록을 지울까요?'),
-        content: const Text('이 기기에서 지우면 되돌릴 수 없어요.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('취소'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('지우기'),
-          ),
-        ],
-      ),
+    final accepted = await askConfirm(
+      context,
+      title: const Text('기록을 지울까요?'),
+      content: const Text('이 기기에서 지우면 되돌릴 수 없어요.'),
     );
     if (accepted != true) return;
     await RecordStore().remove(record.roomId);
@@ -593,23 +642,11 @@ class _RoomPageState extends State<RoomPage> {
 
   Future<void> copyRoom() async {
     final r = room!;
-    final accepted = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('정산을 복제할까요?'),
-        content: const Text(
-          '원래 방은 그대로 두고 새 코드의 방을 만듭니다. 복제한 사람이 새 방장이 되며, 과거 참여자의 지출 기록은 유지됩니다.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('취소'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('복제하기'),
-          ),
-        ],
+    final accepted = await askConfirm(
+      context,
+      title: const Text('정산을 복제할까요?'),
+      content: const Text(
+        '원래 방은 그대로 두고 새 코드의 방을 만듭니다. 복제한 사람이 새 방장이 되며, 과거 참여자의 지출 기록은 유지됩니다.',
       ),
     );
     if (accepted != true || !mounted) return;
@@ -640,25 +677,8 @@ class _RoomPageState extends State<RoomPage> {
     }
   }
 
-  Future<bool> confirm(String title, String body, String action) async =>
-      await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text(title),
-          content: Text(body),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('취소'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: Text(action),
-            ),
-          ],
-        ),
-      ) ??
-      false;
+  Future<bool> confirm(String title, String body) async =>
+      await askConfirm(context, title: Text(title), content: Text(body));
 
   Future<void> freeze() async {
     if (!await confirm(
@@ -666,7 +686,6 @@ class _RoomPageState extends State<RoomPage> {
       '얼린 동안에는 삭제 시간이 멈추고, 지출 입력과 새 참여자 입장도 멈춰요. '
           '얼린 방은 ${roomFreezeLimit.inDays}일 안에 녹이지 않으면 삭제됩니다. '
           '방은 동시에 $roomFreezeSlots개까지 얼릴 수 있어요.',
-      '얼리기',
     )) {
       return;
     }
@@ -679,7 +698,6 @@ class _RoomPageState extends State<RoomPage> {
       '완료하면 더 이상 수정할 수 없어요. 방은 ${roomCompletedLimit.inHours}시간 뒤 '
           '삭제되고, 정산 기록은 각자 기기에 저장됩니다. 친구들은 '
           '${roomCompletedLimit.inHours}시간 안에 이 방을 열어야 기록이 저장돼요.',
-      '정산 완료',
     )) {
       return;
     }
@@ -1152,22 +1170,10 @@ class _ExpensePageState extends State<ExpensePage> {
       (d) => d.name.text.trim().isNotEmpty || d.amount.text.trim().isNotEmpty,
     );
     if (hasInput) {
-      final replace = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('입력한 항목을 바꿀까요?'),
-          content: const Text('영수증에서 읽은 메뉴로 지금 항목을 모두 바꿉니다.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('취소'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('바꾸기'),
-            ),
-          ],
-        ),
+      final replace = await askConfirm(
+        context,
+        title: const Text('입력한 항목을 바꿀까요?'),
+        content: const Text('영수증에서 읽은 메뉴로 지금 항목을 모두 바꿉니다.'),
       );
       if (replace != true || !mounted) return;
     }

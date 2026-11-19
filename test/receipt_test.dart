@@ -165,7 +165,7 @@ void main() {
 
     await tester.tap(find.text('영수증 촬영'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('바꾸기'));
+    await tester.tap(find.text('확인'));
     await tester.pumpAndSettle();
     expect(scanner.calls, 1);
     expect(find.widgetWithText(TextField, '떡볶이'), findsNothing);
