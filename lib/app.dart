@@ -1,16 +1,19 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
 
+import 'data/ledger_store.dart';
 import 'data/record_store.dart';
 import 'data/room_store.dart';
 import 'domain/models.dart';
 import 'domain/receipt.dart';
 import 'domain/record.dart';
 import 'domain/settlement.dart';
+import 'ledger_page.dart';
 
 const _ink = Color(0xFF213025);
 const _lime = Color(0xFFC8EE7D);
@@ -141,8 +144,13 @@ Future<bool> askConfirm(
     ) ??
     false;
 
-/// 창 아래의 "취소 / 확인" 버튼 한 줄. 취소는 false, 확인은 true를 돌려주며 닫는다.
-Widget dialogButtons(BuildContext context) => Row(
+/// 창 아래의 "취소 / 확인" 버튼 한 줄. 취소는 false를, 확인은 [confirmValue]가 있으면
+/// 그 값을, 없으면 true를 돌려주며 닫는다. [canConfirm]이 false면 확인을 누를 수 없다.
+Widget dialogButtons(
+  BuildContext context, {
+  Object? Function()? confirmValue,
+  bool canConfirm = true,
+}) => Row(
   children: [
     Expanded(
       child: FilledButton(
@@ -157,12 +165,24 @@ Widget dialogButtons(BuildContext context) => Row(
     const SizedBox(width: 12),
     Expanded(
       child: FilledButton(
-        onPressed: () => Navigator.pop(context, true),
+        onPressed: canConfirm
+            ? () => Navigator.pop(context, confirmValue?.call() ?? true)
+            : null,
         child: const Text('확인'),
       ),
     ),
   ],
 );
+
+/// 완료된 방을 이 기기에 남긴다. 정산 기록을 저장하고, 내 부담액을 가계부에
+/// 지출 한 건당 한 줄로 넣는다. 그 때문에 이번 달 예산 단계를 넘었으면 알림 문구를 돌려준다.
+Future<String?> keepCompleted(RoomStore store, Room room) async {
+  if (!room.isCompleted) return null;
+  await RecordStore().keep(room);
+  final ledger = LedgerStore();
+  if (!await ledger.importRoom(room, await store.actorId())) return null;
+  return ledger.budgetAlert();
+}
 
 Future<void> showFailure(BuildContext context, Object error) async {
   if (!context.mounted) return;
@@ -253,6 +273,14 @@ class HomePage extends StatelessWidget {
                 MaterialPageRoute(builder: (_) => RoomListPage(store: store)),
               ),
               child: const Text('참여중인 방 목록'),
+            ),
+            TextButton.icon(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const LedgerPage()),
+              ),
+              icon: const Icon(Icons.account_balance_wallet_outlined),
+              label: const Text('내 가계부'),
             ),
           ],
         ),
@@ -395,8 +423,14 @@ class _RoomListPageState extends State<RoomListPage> {
   load() async {
     final records = RecordStore();
     final rooms = await widget.store.listRooms();
+    String? alert;
     for (final room in rooms) {
-      await records.keep(room);
+      alert = await keepCompleted(widget.store, room) ?? alert;
+    }
+    if (alert != null) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => showBudgetAlert(context, alert),
+      );
     }
     return (
       rooms: rooms.where((r) => !r.isCompleted).toList(),
@@ -618,14 +652,15 @@ class _RoomPageState extends State<RoomPage> {
     try {
       final current = await widget.store.getRoom(widget.roomId);
       final id = await widget.store.actorId();
-      // 완료된 방은 서버에서 지워지기 전에 이 기기에 기록으로 남긴다.
-      await RecordStore().keep(current);
+      // 완료된 방은 서버에서 지워지기 전에 이 기기에 기록으로 남기고 가계부에 넣는다.
+      final alert = await keepCompleted(widget.store, current);
       if (mounted) {
         setState(() {
           room = current;
           actor = id;
           loading = false;
         });
+        await showBudgetAlert(context, alert);
       }
     } catch (error) {
       if (mounted) {
@@ -668,10 +703,11 @@ class _RoomPageState extends State<RoomPage> {
   Future<void> act(Future<Room> Function(Room room) action, String done) async {
     try {
       final updated = await action(room!);
-      await RecordStore().keep(updated);
+      final alert = await keepCompleted(widget.store, updated);
       if (!mounted) return;
       setState(() => room = updated);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(done)));
+      await showBudgetAlert(context, alert);
     } catch (error) {
       if (mounted) await showFailure(context, error);
     }
@@ -701,7 +737,10 @@ class _RoomPageState extends State<RoomPage> {
     )) {
       return;
     }
-    await act(widget.store.completeRoom, '정산을 완료했어요. 기록을 이 기기에 저장했습니다.');
+    await act(
+      widget.store.completeRoom,
+      '정산을 완료했어요. 정산 기록과 내 부담액(가계부)을 이 기기에 저장했어요.',
+    );
   }
 
   @override
@@ -1127,9 +1166,15 @@ class _ExpensePageState extends State<ExpensePage> {
   final List<_ItemDraft> items = [];
   bool busy = false;
 
-  /// 마지막으로 읽은 영수증. 항목 합계와 영수증 총액을 비교해 보여준다.
+  /// 마지막으로 읽은 영수증(또는 메뉴판에서 고른 주문). 항목 합계와 총액을 비교해 보여준다.
   ScannedReceipt? scanned;
   bool scanning = false;
+
+  /// 찍을 사진의 종류.
+  ScanMode mode = ScanMode.receipt;
+
+  /// [scanned]가 메뉴판에서 고른 주문이면 [ScanMode.menu].
+  ScanMode scannedMode = ScanMode.receipt;
 
   @override
   void initState() {
@@ -1162,7 +1207,8 @@ class _ExpensePageState extends State<ExpensePage> {
     super.dispose();
   }
 
-  /// 영수증 사진을 읽어 항목을 채운다. 이미 입력한 항목이 있으면 바꿀지 먼저 묻는다.
+  /// 영수증·메뉴판 사진을 읽어 항목을 채운다. 이미 입력한 항목이 있으면 바꿀지 먼저 묻는다.
+  /// 메뉴판이면 주문한 메뉴와 수량, 실제 결제액을 고르는 화면을 거친다.
   Future<void> scan(ImageSource source) async {
     final scanner = widget.store.receiptScanner;
     if (scanner == null || scanning) return;
@@ -1173,16 +1219,30 @@ class _ExpensePageState extends State<ExpensePage> {
       final replace = await askConfirm(
         context,
         title: const Text('입력한 항목을 바꿀까요?'),
-        content: const Text('영수증에서 읽은 메뉴로 지금 항목을 모두 바꿉니다.'),
+        content: const Text('사진에서 읽은 메뉴로 지금 항목을 모두 바꿉니다.'),
       );
       if (replace != true || !mounted) return;
     }
     final photo = await pickReceiptPhoto(source);
     if (photo == null || !mounted) return;
+    final scanMode = mode;
     setState(() => scanning = true);
     try {
-      final receipt = await scanner.scan(photo.bytes, mimeType: photo.mimeType);
+      var receipt = await scanner.scan(
+        photo.bytes,
+        mimeType: photo.mimeType,
+        mode: scanMode,
+      );
       if (!mounted) return;
+      if (scanMode == ScanMode.menu) {
+        setState(() => scanning = false);
+        final order = await Navigator.push<ScannedReceipt>(
+          context,
+          MaterialPageRoute(builder: (_) => MenuOrderPage(menu: receipt)),
+        );
+        if (order == null || !mounted) return;
+        receipt = order;
+      }
       setState(() {
         for (final draft in items) {
           draft.dispose();
@@ -1203,6 +1263,7 @@ class _ExpensePageState extends State<ExpensePage> {
           title.text = receipt.storeName!;
         }
         scanned = receipt;
+        scannedMode = scanMode;
       });
     } catch (error) {
       if (mounted) await showFailure(context, error);
@@ -1288,15 +1349,34 @@ class _ExpensePageState extends State<ExpensePage> {
         if (widget.store.receiptScanner == null)
           const Text('메뉴와 금액을 직접 입력해주세요.')
         else ...[
-          const Text('영수증을 찍거나, 메뉴와 금액을 직접 입력해주세요.'),
+          const Text('영수증이나 메뉴판을 찍거나, 메뉴와 금액을 직접 입력해주세요.'),
           const SizedBox(height: 12),
+          SegmentedButton<ScanMode>(
+            segments: const [
+              ButtonSegment(
+                value: ScanMode.receipt,
+                label: Text('영수증'),
+                icon: Icon(Icons.receipt_long_outlined),
+              ),
+              ButtonSegment(
+                value: ScanMode.menu,
+                label: Text('메뉴판'),
+                icon: Icon(Icons.menu_book_outlined),
+              ),
+            ],
+            selected: {mode},
+            onSelectionChanged: scanning
+                ? null
+                : (value) => setState(() => mode = value.first),
+          ),
+          const SizedBox(height: 8),
           Row(
             children: [
               Expanded(
                 child: OutlinedButton.icon(
                   onPressed: scanning ? null : () => scan(ImageSource.camera),
                   icon: const Icon(Icons.photo_camera_outlined),
-                  label: const Text('영수증 촬영'),
+                  label: Text(mode == ScanMode.menu ? '메뉴판 촬영' : '영수증 촬영'),
                 ),
               ),
               const SizedBox(width: 8),
@@ -1317,13 +1397,14 @@ class _ExpensePageState extends State<ExpensePage> {
                 children: [
                   LinearProgressIndicator(),
                   SizedBox(height: 6),
-                  Text('영수증을 읽는 중이에요…'),
+                  Text('사진을 읽는 중이에요…'),
                 ],
               ),
             ),
           if (scanned != null && !scanning)
             _ScanSummary(
               receipt: scanned!,
+              fromMenu: scannedMode == ScanMode.menu,
               currentTotal: draftTotal,
               onSelectAll: () => setState(() {
                 for (final draft in items) {
@@ -1458,8 +1539,12 @@ class _ScanSummary extends StatelessWidget {
     required this.receipt,
     required this.currentTotal,
     required this.onSelectAll,
+    this.fromMenu = false,
   });
   final ScannedReceipt receipt;
+
+  /// 메뉴판에서 고른 주문이면 총액 대신 사용자가 적은 실제 결제액과 비교한다.
+  final bool fromMenu;
 
   /// 지금 입력된 항목 금액의 합. 사용자가 고치면 바뀐다.
   final int currentTotal;
@@ -1471,16 +1556,20 @@ class _ScanSummary extends StatelessWidget {
     final gap = total == null ? null : total - currentTotal;
     final discount = receipt.discountTotal;
     final names = receipt.discounts.map((d) => d.name).join(', ');
+    final what = fromMenu ? '실제 결제액' : '영수증 총액';
     final (warn, check) = switch (gap) {
+      null when fromMenu => (true, '메뉴판 가격 기준이에요. 실제 결제액과 맞는지 확인해주세요.'),
       null => (true, '영수증 총액을 읽지 못했어요. 금액을 확인해주세요.'),
-      0 => (false, '항목 합계가 영수증 총액 ${money(total!)}과 같아요.'),
+      0 => (false, '항목 합계가 $what ${money(total!)}과 같아요.'),
       > 0 => (
         true,
-        '항목 합계가 영수증 총액 ${money(total!)}보다 ${money(gap)} 적어요. 빠진 메뉴가 없는지 확인해주세요.',
+        '항목 합계가 $what ${money(total!)}보다 ${money(gap)} 적어요. '
+            '${fromMenu ? '옵션이나 추가 금액을 반영해주세요.' : '빠진 메뉴가 없는지 확인해주세요.'}',
       ),
       _ => (
         true,
-        '항목 합계가 영수증 총액 ${money(total!)}보다 ${money(-gap)} 많아요. 금액을 확인해주세요.',
+        '항목 합계가 $what ${money(total!)}보다 ${money(-gap)} 많아요. '
+            '${fromMenu ? '할인이 있었다면 금액을 고쳐주세요.' : '금액을 확인해주세요.'}',
       ),
     };
     return Card(
@@ -1493,7 +1582,9 @@ class _ScanSummary extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '영수증에서 메뉴 ${receipt.items.length}개를 읽었어요.',
+              fromMenu
+                  ? '메뉴판에서 고른 메뉴 ${receipt.items.length}개를 넣었어요.'
+                  : '영수증에서 메뉴 ${receipt.items.length}개를 읽었어요.',
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
             if (discount > 0 && discount < receipt.itemsTotal)
@@ -1514,6 +1605,275 @@ class _ScanSummary extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// 메뉴판에서 읽은 메뉴 중 실제로 주문한 메뉴와 수량, 실제 결제액을 고른다.
+///
+/// 메뉴판에는 주문 내역과 결제 총액이 없으므로 사진만으로 정산을 확정하지 않는다.
+/// 확인을 누르면 고른 주문을 [ScannedReceipt]로 돌려준다.
+class MenuOrderPage extends StatefulWidget {
+  const MenuOrderPage({super.key, required this.menu});
+  final ScannedReceipt menu;
+  @override
+  State<MenuOrderPage> createState() => _MenuOrderPageState();
+}
+
+class _MenuOrderPageState extends State<MenuOrderPage> {
+  late final List<int> quantities = List.filled(widget.menu.items.length, 0);
+  final paid = TextEditingController();
+
+  @override
+  void dispose() {
+    paid.dispose();
+    super.dispose();
+  }
+
+  int get selectedTotal => [
+    for (var i = 0; i < quantities.length; i++)
+      widget.menu.items[i].amount * quantities[i],
+  ].fold(0, (a, b) => a + b);
+
+  void change(int index, int delta) => setState(
+    () => quantities[index] = (quantities[index] + delta).clamp(0, 99),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final items = widget.menu.items;
+    final chosen = quantities.where((q) => q > 0).length;
+    return Scaffold(
+      appBar: AppBar(title: const Text('주문한 메뉴 고르기')),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+        children: [
+          Text(
+            '${widget.menu.storeName ?? '메뉴판'}에서 메뉴 ${items.length}개를 읽었어요.',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            '실제로 주문한 메뉴의 수량을 골라주세요. 메뉴판 가격 기준이라 옵션·할인은 '
+            '다음 화면에서 고칠 수 있어요.',
+            style: TextStyle(fontSize: 13, color: Colors.black54),
+          ),
+          const SizedBox(height: 12),
+          for (var i = 0; i < items.length; i++)
+            Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                title: Text(items[i].name),
+                subtitle: Text(money(items[i].amount)),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      tooltip: '${items[i].name} 빼기',
+                      icon: const Icon(Icons.remove_circle_outline),
+                      onPressed: quantities[i] == 0
+                          ? null
+                          : () => change(i, -1),
+                    ),
+                    SizedBox(
+                      width: 24,
+                      child: Text(
+                        '${quantities[i]}',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: '${items[i].name} 더하기',
+                      icon: const Icon(Icons.add_circle_outline),
+                      onPressed: () => change(i, 1),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          const SizedBox(height: 8),
+          Text(
+            '고른 메뉴 $chosen개 · 메뉴판 가격 합계 ${money(selectedTotal)}',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: paid,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: '실제 결제액 (선택)',
+              hintText: '영수증이나 결제 문자에 적힌 금액',
+              suffixText: '원',
+            ),
+          ),
+          const SizedBox(height: 16),
+          FilledButton(
+            onPressed: chosen == 0
+                ? null
+                : () {
+                    final amount = int.tryParse(
+                      paid.text.replaceAll(RegExp(r'[^0-9]'), ''),
+                    );
+                    Navigator.pop(
+                      context,
+                      widget.menu.order(
+                        quantities,
+                        paid: amount != null && amount > 0 ? amount : null,
+                      ),
+                    );
+                  },
+            child: const Text('확인'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 잔돈 추첨에 쓰는 난수. 테스트에서 바꿔 끼운다.
+Random drawRandom = Random.secure();
+
+/// 잔돈 부담자를 뽑는 가챠(룰렛) 창. 후보를 고르고 돌리면 이름이 빠르게 돌다가
+/// 한 명에서 멈춘다. 확인을 누르면 뽑힌 참여자의 id를 돌려준다.
+class DrawDialog extends StatefulWidget {
+  const DrawDialog({super.key, required this.room, required this.item});
+  final Room room;
+  final LineItem item;
+  @override
+  State<DrawDialog> createState() => _DrawDialogState();
+}
+
+class _DrawDialogState extends State<DrawDialog>
+    with SingleTickerProviderStateMixin {
+  late final Set<String> candidates = widget.item.memberIds.toSet();
+  late final AnimationController spin =
+      AnimationController(
+          vsync: this,
+          duration: const Duration(milliseconds: 2400),
+        )
+        ..addListener(() => setState(() {}))
+        ..addStatusListener((_) => setState(() {}));
+
+  /// 이번 추첨에 쓴 후보(순서 고정)와 뽑힌 사람의 위치.
+  List<String> pool = [];
+  int? winner;
+
+  @override
+  void dispose() {
+    spin.dispose();
+    super.dispose();
+  }
+
+  bool get spinning => spin.isAnimating;
+  bool get done => winner != null && spin.isCompleted;
+
+  /// 지금 룰렛 창에 보이는 참여자 이름. 처음에는 빠르게 돌다 점점 느려져 [winner]에서 멈춘다.
+  String? get shown {
+    if (winner == null || pool.isEmpty) return null;
+    final steps = pool.length * 5 + winner!;
+    final t = Curves.easeOutCubic.transform(spin.value);
+    return widget.room.memberName(pool[(t * steps).floor() % pool.length]);
+  }
+
+  void roll() {
+    pool = widget.item.memberIds.where(candidates.contains).toList();
+    winner = drawRandom.nextInt(pool.length);
+    spin.forward(from: 0);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final members = widget.item.memberIds;
+    final all = candidates.length == members.length;
+    final name = shown;
+    return AlertDialog(
+      title: const Text('잔돈 추첨'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              '${widget.item.name}의 잔돈 ${money(widget.item.remainder)}을 낼 사람을 뽑아요.',
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              children: [
+                FilterChip(
+                  label: const Text('모두 선택'),
+                  selected: all,
+                  onSelected: spinning
+                      ? null
+                      : (_) => setState(() {
+                          winner = null;
+                          if (all) {
+                            candidates.clear();
+                          } else {
+                            candidates.addAll(members);
+                          }
+                        }),
+                ),
+                for (final id in members)
+                  FilterChip(
+                    label: Text(widget.room.memberName(id)),
+                    selected: candidates.contains(id),
+                    onSelected: spinning
+                        ? null
+                        : (on) => setState(() {
+                            winner = null;
+                            on ? candidates.add(id) : candidates.remove(id);
+                          }),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Container(
+              height: 88,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: done ? _lime : _soft,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                name ?? '?',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                key: const Key('draw-slot'),
+                style: const TextStyle(
+                  fontSize: 30,
+                  fontWeight: FontWeight.w800,
+                  color: _ink,
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              done
+                  ? '$name 님이 잔돈 ${money(widget.item.remainder)}을 내요!'
+                  : candidates.isEmpty
+                  ? '추첨할 사람을 한 명 이상 골라주세요.'
+                  : '후보 ${candidates.length}명 중 한 명을 뽑아요.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: spinning || candidates.isEmpty ? null : roll,
+              icon: const Icon(Icons.casino_outlined),
+              label: Text(done ? '다시 돌리기' : '돌리기'),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        dialogButtons(
+          context,
+          canConfirm: done,
+          confirmValue: () => pool[winner!],
+        ),
+      ],
     );
   }
 }
@@ -1598,8 +1958,9 @@ class _RemainderPageState extends State<RemainderPage> {
           const SizedBox(height: 8),
           Text(
             widget.canEdit
-                ? '각 항목의 잔돈을 부담할 사람을 골라주세요.'
-                : '방장이 잔돈 부담자를 지정하면 정산 결과를 볼 수 있어요.',
+                ? '각 항목의 잔돈을 부담할 사람을 추첨하거나 직접 골라주세요. '
+                      '정한 결과는 참여자 모두에게 똑같이 보여요.'
+                : '방장이 잔돈 부담자를 정하면 정산 결과를 볼 수 있어요.',
           ),
           const SizedBox(height: 20),
           for (final entry in pending)
@@ -1622,6 +1983,35 @@ class _RemainderPageState extends State<RemainderPage> {
                       ),
                     ),
                     const SizedBox(height: 10),
+                    if (widget.canEdit) ...[
+                      OutlinedButton.icon(
+                        onPressed: busy
+                            ? null
+                            : () async {
+                                final winner = await showDialog<Object?>(
+                                  context: context,
+                                  barrierDismissible: false,
+                                  builder: (_) =>
+                                      DrawDialog(room: room, item: entry.item),
+                                );
+                                if (winner is String) {
+                                  await assign(
+                                    entry.expense.id,
+                                    entry.item.id,
+                                    winner,
+                                  );
+                                }
+                              },
+                        icon: const Icon(Icons.casino_outlined),
+                        label: const Text('추첨으로 정하기'),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        '또는 직접 고르기',
+                        style: TextStyle(fontSize: 13, color: Colors.black54),
+                      ),
+                      const SizedBox(height: 4),
+                    ],
                     if (widget.canEdit)
                       Wrap(
                         spacing: 8,
