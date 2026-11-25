@@ -75,42 +75,18 @@ class _LedgerPageState extends State<LedgerPage> {
       setState(() => month = DateTime(month.year, month.month + delta));
 
   Future<void> editBudget() async {
-    final controller = TextEditingController(
-      text: budget == null ? '' : '$budget',
+    final text = await askText(
+      context,
+      title: '한 달 예산',
+      label: '예산',
+      hint: '예: 300000',
+      suffix: '원',
+      digitsOnly: true,
+      initial: budget == null ? '' : '$budget',
+      help: '이번 달 사용액이 예산의 80%와 100%를 넘으면 알려드려요. 비워 두면 예산을 없애요.',
     );
-    final accepted = await showDialog<Object?>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('한 달 예산'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            TextField(
-              controller: controller,
-              autofocus: true,
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: const InputDecoration(
-                labelText: '예산',
-                hintText: '예: 300000',
-                suffixText: '원',
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              '이번 달 사용액이 예산의 80%와 100%를 넘으면 알려드려요. 비워 두면 예산을 없애요.',
-              style: TextStyle(fontSize: 13, color: Colors.black54),
-            ),
-          ],
-        ),
-        actions: [dialogButtons(context)],
-      ),
-    );
-    final value = int.tryParse(controller.text);
-    controller.dispose();
-    if (accepted != true) return;
-    await store.setBudget(value);
+    if (text == null) return;
+    await store.setBudget(int.tryParse(text));
     await load();
     final alert = await store.budgetAlert();
     if (mounted) await showBudgetAlert(context, alert);

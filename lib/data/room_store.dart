@@ -40,7 +40,16 @@ abstract class RoomStore {
 
   /// 방을 바로 삭제한다. 방장만 할 수 있다.
   Future<void> deleteRoom(Room room);
+
+  /// 방장이 정산할 사람을 이름으로 추가한다. 앱 계정과 연결되지 않은 참여자로 들어간다.
+  Future<Room> addMember(Room room, String name);
+
+  /// 방장이 참여자를 뺀다. 방장과 지출에 들어간 사람은 뺄 수 없다.
+  Future<Room> removeMember(Room room, String memberId);
 }
+
+/// 한 방에 있을 수 있는 최대 인원.
+const roomMemberLimit = 30;
 
 /// 체험 모드 저장소. 서버와 같은 48시간 규칙을 기기 안에서 적용한다.
 ///
@@ -137,6 +146,48 @@ class LocalRoomStore implements RoomStore {
     }
     return current.copyWith(completedAt: _now);
   });
+
+  @override
+  Future<Room> addMember(Room room, String name) =>
+      _ownerUpdate(room, (current, _, _) {
+        _editable(current);
+        final clean = name.trim();
+        if (clean.isEmpty || clean.length > 12) {
+          throw StateError('이름은 1~12자로 입력해주세요.');
+        }
+        if (current.members.length >= roomMemberLimit) {
+          throw StateError('한 방에는 $roomMemberLimit명까지 있을 수 있어요.');
+        }
+        if (current.members.any((m) => m.name == clean)) {
+          throw StateError('이미 같은 이름의 참여자가 있어요.');
+        }
+        return current.copyWith(
+          members: [
+            ...current.members,
+            Member(id: newId(), name: clean),
+          ],
+          lastActivityAt: _now,
+        );
+      });
+
+  @override
+  Future<Room> removeMember(Room room, String memberId) =>
+      _ownerUpdate(room, (current, _, _) {
+        _editable(current);
+        if (memberId == current.ownerMemberId) {
+          throw StateError('방장은 뺄 수 없어요.');
+        }
+        if (!current.members.any((m) => m.id == memberId)) {
+          throw StateError('방에 없는 참여자예요.');
+        }
+        if (current.usesMember(memberId)) {
+          throw StateError('지출에 들어간 사람은 뺄 수 없어요. 먼저 지출에서 빼주세요.');
+        }
+        return current.copyWith(
+          members: current.members.where((m) => m.id != memberId).toList(),
+          lastActivityAt: _now,
+        );
+      });
 
   @override
   Future<void> deleteRoom(Room room) async {
@@ -442,6 +493,28 @@ class CloudRoomStore implements RoomStore {
   @override
   Future<Room> completeRoom(Room room) =>
       _roomAction('complete_toong_room', room);
+
+  @override
+  Future<Room> addMember(Room room, String name) async {
+    await _signIn();
+    return _room(
+      await client.rpc(
+        'add_toong_member',
+        params: {'p_room_id': room.id, 'p_name': name},
+      ),
+    );
+  }
+
+  @override
+  Future<Room> removeMember(Room room, String memberId) async {
+    await _signIn();
+    return _room(
+      await client.rpc(
+        'remove_toong_member',
+        params: {'p_room_id': room.id, 'p_member_id': memberId},
+      ),
+    );
+  }
 
   @override
   Future<void> deleteRoom(Room room) async {
