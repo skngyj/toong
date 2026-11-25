@@ -144,11 +144,13 @@ Future<bool> askConfirm(
     ) ??
     false;
 
-/// 창 아래의 "취소 / 확인" 버튼 한 줄. 취소는 false를, 확인은 [confirmValue]가 있으면
-/// 그 값을, 없으면 true를 돌려주며 닫는다. [canConfirm]이 false면 확인을 누를 수 없다.
+/// 창 아래의 "취소 / 확인" 버튼 한 줄. 취소는 [cancelValue](기본 false)를, 확인은
+/// [confirmValue]가 있으면 그 값을, 없으면 true를 돌려주며 닫는다.
+/// [canConfirm]이 false면 확인을 누를 수 없다.
 Widget dialogButtons(
   BuildContext context, {
   Object? Function()? confirmValue,
+  Object? cancelValue = false,
   bool canConfirm = true,
 }) => Row(
   children: [
@@ -158,7 +160,7 @@ Widget dialogButtons(
           backgroundColor: _danger,
           foregroundColor: Colors.white,
         ),
-        onPressed: () => Navigator.pop(context, false),
+        onPressed: () => Navigator.pop(context, cancelValue),
         child: const Text('취소'),
       ),
     ),
@@ -173,6 +175,104 @@ Widget dialogButtons(
     ),
   ],
 );
+
+/// 글자 하나를 입력받는 창. 확인하면 입력한 글자(앞뒤 공백 제거)를, 취소하면 null을 돌려준다.
+Future<String?> askText(
+  BuildContext context, {
+  required String title,
+  required String label,
+  String? hint,
+  String? help,
+  String initial = '',
+  int? maxLength,
+  String? suffix,
+  bool digitsOnly = false,
+}) => showDialog<String>(
+  context: context,
+  builder: (_) => _TextDialog(
+    title: title,
+    label: label,
+    hint: hint,
+    help: help,
+    initial: initial,
+    maxLength: maxLength,
+    suffix: suffix,
+    digitsOnly: digitsOnly,
+  ),
+);
+
+/// [askText]의 창. 입력 칸의 컨트롤러를 창이 완전히 닫힌 뒤에 정리하도록 직접 가진다.
+class _TextDialog extends StatefulWidget {
+  const _TextDialog({
+    required this.title,
+    required this.label,
+    required this.initial,
+    required this.digitsOnly,
+    this.hint,
+    this.help,
+    this.maxLength,
+    this.suffix,
+  });
+  final String title;
+  final String label;
+  final String? hint;
+  final String? help;
+  final String initial;
+  final int? maxLength;
+  final String? suffix;
+  final bool digitsOnly;
+  @override
+  State<_TextDialog> createState() => _TextDialogState();
+}
+
+class _TextDialogState extends State<_TextDialog> {
+  late final controller = TextEditingController(text: widget.initial);
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(widget.title),
+    content: SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: controller,
+            autofocus: true,
+            maxLength: widget.maxLength,
+            keyboardType: widget.digitsOnly ? TextInputType.number : null,
+            inputFormatters: widget.digitsOnly
+                ? [FilteringTextInputFormatter.digitsOnly]
+                : null,
+            decoration: InputDecoration(
+              labelText: widget.label,
+              hintText: widget.hint,
+              suffixText: widget.suffix,
+            ),
+          ),
+          if (widget.help != null)
+            Text(
+              widget.help!,
+              style: const TextStyle(fontSize: 13, color: Colors.black54),
+            ),
+        ],
+      ),
+    ),
+    actions: [
+      dialogButtons(
+        context,
+        confirmValue: () => controller.text.trim(),
+        cancelValue: null,
+      ),
+    ],
+  );
+}
 
 /// 완료된 방을 이 기기에 남긴다. 정산 기록을 저장하고, 내 부담액을 가계부에
 /// 지출 한 건당 한 줄로 넣는다. 그 때문에 이번 달 예산 단계를 넘었으면 알림 문구를 돌려준다.
@@ -713,6 +813,46 @@ class _RoomPageState extends State<RoomPage> {
     }
   }
 
+  /// 방장이 정산할 사람을 이름으로 추가한다. 앱을 쓰지 않는 친구도 넣을 수 있다.
+  Future<void> addMember() async {
+    final name = await askText(
+      context,
+      title: '사람 추가',
+      label: '이름',
+      hint: '정산에 넣을 친구 이름',
+      maxLength: 12,
+      help:
+          '앱을 쓰지 않는 친구도 넣을 수 있어요. 그 친구가 나중에 방에 들어오면 '
+          '‘과거 참여자 기록 연결’로 합칠 수 있어요.',
+    );
+    if (name == null || name.isEmpty || !mounted) return;
+    await act((room) => widget.store.addMember(room, name), '$name 님을 추가했어요.');
+  }
+
+  /// 방장이 참여자를 뺀다. 지출에 들어간 사람은 먼저 지출에서 빼야 한다.
+  Future<void> removeMember(Member member) async {
+    final r = room!;
+    if (r.usesMember(member.id)) {
+      return showFailure(
+        context,
+        StateError('${member.name} 님이 들어간 지출이 있어 뺄 수 없어요. 먼저 지출에서 빼주세요.'),
+      );
+    }
+    if (!await confirm(
+      '${member.name} 님을 뺄까요?',
+      member.actorId == null
+          ? '정산 인원에서 빠져요.'
+          : '정산 인원에서 빠지고, ${member.name} 님은 이 방을 더 볼 수 없어요. '
+                '방 코드로 다시 들어올 수는 있어요.',
+    )) {
+      return;
+    }
+    await act(
+      (room) => widget.store.removeMember(room, member.id),
+      '${member.name} 님을 뺐어요.',
+    );
+  }
+
   Future<bool> confirm(String title, String body) async =>
       await askConfirm(context, title: Text(title), content: Text(body));
 
@@ -851,15 +991,25 @@ class _RoomPageState extends State<RoomPage> {
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
-                  children: r.members
-                      .map(
-                        (m) => Chip(
-                          label: Text(
-                            '${m.name}${m.id == r.ownerMemberId ? ' · 방장' : ''}${m.actorId == null ? ' · 미연결' : ''}',
-                          ),
+                  children: [
+                    for (final m in r.members)
+                      Chip(
+                        label: Text(
+                          '${m.name}${m.id == r.ownerMemberId ? ' · 방장' : ''}${m.actorId == null ? ' · 미연결' : ''}',
                         ),
-                      )
-                      .toList(),
+                        deleteIcon: const Icon(Icons.close, size: 18),
+                        deleteButtonTooltipMessage: '${m.name} 빼기',
+                        onDeleted: owner && m.id != r.ownerMemberId
+                            ? () => removeMember(m)
+                            : null,
+                      ),
+                    if (owner && r.members.length < roomMemberLimit)
+                      ActionChip(
+                        avatar: const Icon(Icons.person_add_alt_1, size: 18),
+                        label: const Text('사람 추가'),
+                        onPressed: addMember,
+                      ),
+                  ],
                 ),
                 if (owner && r.members.any((m) => m.actorId == null))
                   TextButton.icon(

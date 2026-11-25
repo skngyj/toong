@@ -225,6 +225,13 @@ class Room {
 
   bool owns(String actorId) => actorMember(actorId)?.id == ownerMemberId;
 
+  /// 이 참여자가 지출의 결제자나 부담자로 들어가 있는지.
+  bool usesMember(String memberId) => expenses.any(
+    (e) =>
+        e.payerId == memberId ||
+        e.items.any((i) => i.memberIds.contains(memberId)),
+  );
+
   Room copyWith({
     List<Member>? members,
     List<Expense>? expenses,

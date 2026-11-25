@@ -217,4 +217,32 @@ void main() {
     expect(find.textContaining('교통'), findsWidgets);
     expect(find.textContaining('예산 10,000원 중 85% 썼어요'), findsOneWidget);
   });
+
+  testWidgets('예산을 정하고 취소하고 없앨 수 있다', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(const MaterialApp(home: LedgerPage()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('한 달 예산 정하기'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '300000');
+    await tester.tap(find.widgetWithText(FilledButton, '확인'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('예산 300,000원 중 0% 썼어요'), findsOneWidget);
+    expect(await LedgerStore().budget(), 300000);
+
+    await tester.tap(find.text('예산 바꾸기'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '1');
+    await tester.tap(find.widgetWithText(FilledButton, '취소'));
+    await tester.pumpAndSettle();
+    expect(await LedgerStore().budget(), 300000);
+
+    await tester.tap(find.text('예산 바꾸기'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '');
+    await tester.tap(find.widgetWithText(FilledButton, '확인'));
+    await tester.pumpAndSettle();
+    expect(await LedgerStore().budget(), isNull);
+    expect(find.text('한 달 예산 정하기'), findsOneWidget);
+  });
 }
