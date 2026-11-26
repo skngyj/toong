@@ -38,6 +38,7 @@ dependencies:
   app_links: ^7.2.1
   shared_preferences: ^2.5.5
   image_picker: ^1.2.4
+  gal: ^3.0.1
 
 dev_dependencies:
   flutter_test:

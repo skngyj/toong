@@ -1,6 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 영수증 이미지를 사진 앱에 저장(Android 10 이하에서만 필요) -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
     <application
+        android:requestLegacyExternalStorage="true"
         android:label="퉁"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">

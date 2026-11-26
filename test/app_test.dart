@@ -186,7 +186,9 @@ void main() {
     expect(find.text('주고받을 돈이 없어요.'), findsOneWidget);
     expect(find.text('음식점'), findsOneWidget);
     expect(find.text('10,000원'), findsOneWidget);
-    await tester.tap(find.text('기록 복사'));
+    await tester.ensureVisible(find.text('글자로 복사'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('글자로 복사'));
     await tester.pumpAndSettle();
     expect(copied.single, contains('- 주고받을 돈이 없습니다.'));
   });

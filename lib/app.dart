@@ -92,6 +92,17 @@ class _ToongAppState extends State<ToongApp> {
     title: '퉁',
     debugShowCheckedModeBanner: false,
     theme: toongTheme(),
+    // 화면 아래 시스템 내비게이션 바(제스처 바·버튼)에 내용이 가리지 않게 한다.
+    // Android 15부터는 앱이 화면 맨 아래까지 그려지므로 모든 화면에 아래 여백을 둔다.
+    builder: (context, child) => ColoredBox(
+      color: toongCanvas,
+      child: SafeArea(
+        top: false,
+        left: false,
+        right: false,
+        child: child ?? const SizedBox.shrink(),
+      ),
+    ),
     home: HomePage(store: store),
   );
 }
@@ -633,11 +644,21 @@ String formatDay(DateTime time) {
 }
 
 /// 기기에 저장된 완료 정산 기록. 서버 방이 삭제된 뒤에도 볼 수 있다.
-class RecordPage extends StatelessWidget {
+/// 영수증 모양으로 보여주고, 영수증을 그대로 찍어 사진 앱에 저장할 수 있다.
+class RecordPage extends StatefulWidget {
   const RecordPage({super.key, required this.record});
   final SettlementRecord record;
+  @override
+  State<RecordPage> createState() => _RecordPageState();
+}
 
-  Future<void> remove(BuildContext context) async {
+class _RecordPageState extends State<RecordPage> {
+  final receipt = GlobalKey<CapturableReceiptState>();
+  bool saving = false;
+
+  SettlementRecord get record => widget.record;
+
+  Future<void> remove() async {
     final accepted = await askConfirm(
       context,
       title: const Text('기록을 지울까요?'),
@@ -645,7 +666,17 @@ class RecordPage extends StatelessWidget {
     );
     if (accepted != true) return;
     await RecordStore().remove(record.roomId);
-    if (context.mounted) Navigator.pop(context);
+    if (mounted) Navigator.pop(context);
+  }
+
+  Future<void> saveImage() async {
+    setState(() => saving = true);
+    await saveReceiptImage(
+      context,
+      receipt,
+      receiptFileName(record.name, record.completedAt),
+    );
+    if (mounted) setState(() => saving = false);
   }
 
   @override
@@ -658,30 +689,47 @@ class RecordPage extends StatelessWidget {
         IconButton(
           icon: const Icon(Icons.delete_outline),
           tooltip: '기록 지우기',
-          onPressed: () => remove(context),
+          onPressed: remove,
         ),
       ],
     ),
     body: ListView(
-      padding: const EdgeInsets.fromLTRB(24, 12, 24, 28),
+      padding: const EdgeInsets.fromLTRB(6, 0, 6, 28),
       children: [
         // 완료된 정산은 영수증 모양으로 보여준다. 예전 기록은 저장된 글자로 그린다.
-        ReceiptPaper(
-          child: record.room != null
-              ? ReceiptContent(room: record.room!)
-              : ReceiptTextContent(text: record.text),
+        CapturableReceipt(
+          key: receipt,
+          child: ReceiptPaper(
+            child: record.room != null
+                ? ReceiptContent(room: record.room!)
+                : ReceiptTextContent(text: record.text),
+          ),
         ),
-        const SizedBox(height: 20),
-        FilledButton.icon(
-          onPressed: () async {
-            await Clipboard.setData(ClipboardData(text: record.text));
-            if (context.mounted) {
-              ScaffoldMessenger.of(context)
-                  .showSnackBar(const SnackBar(content: Text('정산 기록을 복사했어요.')));
-            }
-          },
-          icon: const Icon(Icons.copy),
-          label: const Text('기록 복사'),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 18),
+          child: Column(
+            children: [
+              const SizedBox(height: 8),
+              FilledButton.icon(
+                onPressed: saving ? null : saveImage,
+                icon: const Icon(Icons.download_outlined),
+                label: Text(saving ? '저장 중…' : '영수증 이미지 저장'),
+              ),
+              const SizedBox(height: 4),
+              TextButton.icon(
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: record.text));
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('정산 기록을 글자로 복사했어요.')),
+                    );
+                  }
+                },
+                icon: const Icon(Icons.copy, size: 18),
+                label: const Text('글자로 복사'),
+              ),
+            ],
+          ),
         ),
       ],
     ),

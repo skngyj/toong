@@ -39,6 +39,8 @@
 	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>영수증을 찍어 메뉴와 금액을 자동으로 입력합니다.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>정산 영수증 이미지를 사진 앱에 저장합니다.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>앨범의 영수증 사진에서 메뉴와 금액을 읽습니다.</string>
 	<key>LSRequiresIPhoneOS</key>
