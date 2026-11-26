@@ -13,6 +13,7 @@ import 'domain/models.dart';
 import 'domain/receipt.dart';
 import 'domain/record.dart';
 import 'domain/settlement.dart';
+import 'freeze_effect.dart';
 import 'ledger_page.dart';
 import 'receipt_view.dart';
 import 'theme.dart';
@@ -1054,8 +1055,21 @@ class _RoomPageState extends State<RoomPage> {
                   children: [
                     for (final m in r.members)
                       Chip(
-                        label: Text(
-                          '${m.name}${m.id == r.ownerMemberId ? ' · 방장' : ''}${m.actorId == null ? ' · 미연결' : ''}',
+                        label: Text.rich(
+                          TextSpan(
+                            text:
+                                '${m.name}${m.id == r.ownerMemberId ? ' · 방장' : ''}',
+                            children: [
+                              if (m.actorId == null)
+                                const TextSpan(
+                                  text: ' · 미연결',
+                                  style: TextStyle(
+                                    color: toongDanger,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                            ],
+                          ),
                         ),
                         deleteIcon: const Icon(Icons.close, size: 18),
                         deleteButtonTooltipMessage: '${m.name} 빼기',
@@ -1251,63 +1265,69 @@ class _ExpiryCard extends StatelessWidget {
       ),
       _ => (Icons.timer_outlined, left, roomExpiryNotice),
     };
+    final icy = room.isFrozen && !room.isCompleted && !expired;
     return Card(
-      color: expired || urgent ? toongWarn : _soft,
+      color: Colors.transparent,
       elevation: 0,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, color: _ink, size: 20),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    body,
-                    style: const TextStyle(fontSize: 13, color: toongSub),
-                  ),
-                  if (onExtend != null || onFreeze != null || onThaw != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Wrap(
-                        spacing: 8,
-                        children: [
-                          if (onExtend != null)
-                            OutlinedButton.icon(
-                              onPressed: onExtend,
-                              icon: const Icon(Icons.update, size: 18),
-                              label: Text('연장 (${room.extendsLeft}회 남음)'),
-                            ),
-                          if (onFreeze != null)
-                            OutlinedButton.icon(
-                              onPressed: onFreeze,
-                              icon: const Icon(Icons.ac_unit, size: 18),
-                              label: const Text('얼리기'),
-                            ),
-                          if (onThaw != null)
-                            OutlinedButton.icon(
-                              onPressed: onThaw,
-                              icon: const Icon(
-                                Icons.wb_sunny_outlined,
-                                size: 18,
-                              ),
-                              label: const Text('녹이기'),
-                            ),
-                        ],
-                      ),
+      clipBehavior: Clip.antiAlias,
+      child: IceBox(
+        frozen: icy,
+        color: expired || urgent ? toongWarn : _soft,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(icon, color: icy ? iceDeep : _ink, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
-                ],
+                    const SizedBox(height: 4),
+                    Text(
+                      body,
+                      style: const TextStyle(fontSize: 13, color: toongSub),
+                    ),
+                    if (onExtend != null || onFreeze != null || onThaw != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Wrap(
+                          spacing: 8,
+                          children: [
+                            if (onExtend != null)
+                              OutlinedButton.icon(
+                                onPressed: onExtend,
+                                icon: const Icon(Icons.update, size: 18),
+                                label: Text('연장 (${room.extendsLeft}회 남음)'),
+                              ),
+                            if (onFreeze != null)
+                              OutlinedButton.icon(
+                                onPressed: onFreeze,
+                                icon: const Icon(Icons.ac_unit, size: 18),
+                                label: const Text('얼리기'),
+                              ),
+                            if (onThaw != null)
+                              OutlinedButton.icon(
+                                onPressed: onThaw,
+                                icon: const Icon(
+                                  Icons.wb_sunny_outlined,
+                                  size: 18,
+                                ),
+                                label: const Text('녹이기'),
+                              ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
