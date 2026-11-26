@@ -14,16 +14,13 @@ class FakeScanner implements ReceiptScanner {
   FakeScanner(this.result);
   final ScannedReceipt result;
   int calls = 0;
-  ScanMode? lastMode;
 
   @override
   Future<ScannedReceipt> scan(
     Uint8List image, {
     String mimeType = 'image/jpeg',
-    ScanMode mode = ScanMode.receipt,
   }) async {
     calls++;
-    lastMode = mode;
     return result;
   }
 }
@@ -173,73 +170,5 @@ void main() {
     expect(scanner.calls, 1);
     expect(find.widgetWithText(TextField, '떡볶이'), findsNothing);
     expect(find.text('영수증 총액을 읽지 못했어요. 금액을 확인해주세요.'), findsOneWidget);
-  });
-
-  test('메뉴판에서 고른 수량으로 주문 항목을 만든다', () {
-    final menu = ScannedReceipt.fromJson({
-      'storeName': '분식 퉁퉁',
-      'items': [
-        {'name': '떡볶이', 'quantity': 1, 'unitPrice': 5000, 'amount': 5000},
-        {'name': '김밥', 'quantity': 1, 'unitPrice': 3000, 'amount': 3000},
-        {'name': '라면', 'quantity': 1, 'unitPrice': 4000, 'amount': 4000},
-      ],
-    });
-    final order = menu.order([2, 0, 1], paid: 14500);
-    expect(order.storeName, '분식 퉁퉁');
-    expect(order.toLines().map((l) => l.name), ['떡볶이 ×2', '라면']);
-    expect(order.toLines().map((l) => l.amount), [10000, 4000]);
-    expect(order.total, 14500);
-    expect(order.difference, 500);
-  });
-
-  testWidgets('메뉴판을 찍으면 주문한 메뉴와 수량을 골라 항목을 채운다', (tester) async {
-    SharedPreferences.setMockInitialValues({});
-    final scanner = FakeScanner(
-      ScannedReceipt.fromJson({
-        'storeName': '분식 퉁퉁',
-        'items': [
-          {'name': '떡볶이', 'quantity': 1, 'unitPrice': 5000, 'amount': 5000},
-          {'name': '김밥', 'quantity': 1, 'unitPrice': 3000, 'amount': 3000},
-        ],
-      }),
-    );
-    final store = LocalRoomStore(receiptScanner: scanner);
-    final room = await store.createRoom('모임', '민수');
-    pickReceiptPhoto = (_) async =>
-        (bytes: Uint8List(4), mimeType: 'image/jpeg');
-    await tester.pumpWidget(
-      MaterialApp(
-        home: ExpensePage(store: store, room: room),
-      ),
-    );
-    await tester.tap(find.text('메뉴판'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('메뉴판 촬영'));
-    await tester.pumpAndSettle();
-    expect(scanner.lastMode, ScanMode.menu);
-    expect(find.text('주문한 메뉴 고르기'), findsOneWidget);
-
-    // 고른 메뉴가 없으면 확인을 누를 수 없다.
-    expect(
-      tester
-          .widget<FilledButton>(find.widgetWithText(FilledButton, '확인'))
-          .onPressed,
-      isNull,
-    );
-    await tester.tap(find.byTooltip('떡볶이 더하기'));
-    await tester.tap(find.byTooltip('떡볶이 더하기'));
-    await tester.tap(find.byTooltip('김밥 더하기'));
-    await tester.pump();
-    expect(find.text('고른 메뉴 2개 · 메뉴판 가격 합계 13,000원'), findsOneWidget);
-    await tester.enterText(find.byType(TextField), '12,000');
-    await tester.ensureVisible(find.widgetWithText(FilledButton, '확인'));
-    await tester.tap(find.widgetWithText(FilledButton, '확인'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('메뉴판에서 고른 메뉴 2개를 넣었어요.'), findsOneWidget);
-    expect(find.widgetWithText(TextField, '분식 퉁퉁'), findsOneWidget);
-    expect(find.widgetWithText(TextField, '떡볶이 ×2'), findsOneWidget);
-    expect(find.widgetWithText(TextField, '10000'), findsOneWidget);
-    expect(find.textContaining('실제 결제액 12,000원보다 1,000원 많아요'), findsOneWidget);
   });
 }

@@ -5,12 +5,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../domain/receipt.dart';
 
-/// 영수증·메뉴판 사진을 읽어 메뉴·금액을 돌려준다.
+/// 영수증 사진을 읽어 메뉴·금액을 돌려준다.
 abstract class ReceiptScanner {
   Future<ScannedReceipt> scan(
     Uint8List image, {
     String mimeType = 'image/jpeg',
-    ScanMode mode = ScanMode.receipt,
   });
 }
 
@@ -24,16 +23,11 @@ class CloudReceiptScanner implements ReceiptScanner {
   Future<ScannedReceipt> scan(
     Uint8List image, {
     String mimeType = 'image/jpeg',
-    ScanMode mode = ScanMode.receipt,
   }) async {
     if (client.auth.currentUser == null) {
       await client.auth.signInAnonymously();
     }
-    final body = {
-      'image': base64Encode(image),
-      'mimeType': mimeType,
-      'mode': mode.name,
-    };
+    final body = {'image': base64Encode(image), 'mimeType': mimeType};
     try {
       FunctionResponse response;
       try {
@@ -58,7 +52,7 @@ class CloudReceiptScanner implements ReceiptScanner {
       final details = error.details;
       final message = details is Map && details['error'] is String
           ? details['error'] as String
-          : '사진을 읽지 못했어요. 잠시 후 다시 시도하거나 직접 입력해주세요.';
+          : '영수증을 읽지 못했어요. 잠시 후 다시 시도하거나 직접 입력해주세요.';
       throw StateError(message);
     }
   }

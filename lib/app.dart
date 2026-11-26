@@ -1316,15 +1316,9 @@ class _ExpensePageState extends State<ExpensePage> {
   final List<_ItemDraft> items = [];
   bool busy = false;
 
-  /// 마지막으로 읽은 영수증(또는 메뉴판에서 고른 주문). 항목 합계와 총액을 비교해 보여준다.
+  /// 마지막으로 읽은 영수증. 항목 합계와 영수증 총액을 비교해 보여준다.
   ScannedReceipt? scanned;
   bool scanning = false;
-
-  /// 찍을 사진의 종류.
-  ScanMode mode = ScanMode.receipt;
-
-  /// [scanned]가 메뉴판에서 고른 주문이면 [ScanMode.menu].
-  ScanMode scannedMode = ScanMode.receipt;
 
   @override
   void initState() {
@@ -1357,8 +1351,7 @@ class _ExpensePageState extends State<ExpensePage> {
     super.dispose();
   }
 
-  /// 영수증·메뉴판 사진을 읽어 항목을 채운다. 이미 입력한 항목이 있으면 바꿀지 먼저 묻는다.
-  /// 메뉴판이면 주문한 메뉴와 수량, 실제 결제액을 고르는 화면을 거친다.
+  /// 영수증 사진을 읽어 항목을 채운다. 이미 입력한 항목이 있으면 바꿀지 먼저 묻는다.
   Future<void> scan(ImageSource source) async {
     final scanner = widget.store.receiptScanner;
     if (scanner == null || scanning) return;
@@ -1369,30 +1362,16 @@ class _ExpensePageState extends State<ExpensePage> {
       final replace = await askConfirm(
         context,
         title: const Text('입력한 항목을 바꿀까요?'),
-        content: const Text('사진에서 읽은 메뉴로 지금 항목을 모두 바꿉니다.'),
+        content: const Text('영수증에서 읽은 메뉴로 지금 항목을 모두 바꿉니다.'),
       );
       if (replace != true || !mounted) return;
     }
     final photo = await pickReceiptPhoto(source);
     if (photo == null || !mounted) return;
-    final scanMode = mode;
     setState(() => scanning = true);
     try {
-      var receipt = await scanner.scan(
-        photo.bytes,
-        mimeType: photo.mimeType,
-        mode: scanMode,
-      );
+      final receipt = await scanner.scan(photo.bytes, mimeType: photo.mimeType);
       if (!mounted) return;
-      if (scanMode == ScanMode.menu) {
-        setState(() => scanning = false);
-        final order = await Navigator.push<ScannedReceipt>(
-          context,
-          MaterialPageRoute(builder: (_) => MenuOrderPage(menu: receipt)),
-        );
-        if (order == null || !mounted) return;
-        receipt = order;
-      }
       setState(() {
         for (final draft in items) {
           draft.dispose();
@@ -1413,7 +1392,6 @@ class _ExpensePageState extends State<ExpensePage> {
           title.text = receipt.storeName!;
         }
         scanned = receipt;
-        scannedMode = scanMode;
       });
     } catch (error) {
       if (mounted) await showFailure(context, error);
@@ -1499,34 +1477,15 @@ class _ExpensePageState extends State<ExpensePage> {
         if (widget.store.receiptScanner == null)
           const Text('메뉴와 금액을 직접 입력해주세요.')
         else ...[
-          const Text('영수증이나 메뉴판을 찍거나, 메뉴와 금액을 직접 입력해주세요.'),
+          const Text('영수증을 찍거나, 메뉴와 금액을 직접 입력해주세요.'),
           const SizedBox(height: 12),
-          SegmentedButton<ScanMode>(
-            segments: const [
-              ButtonSegment(
-                value: ScanMode.receipt,
-                label: Text('영수증'),
-                icon: Icon(Icons.receipt_long_outlined),
-              ),
-              ButtonSegment(
-                value: ScanMode.menu,
-                label: Text('메뉴판'),
-                icon: Icon(Icons.menu_book_outlined),
-              ),
-            ],
-            selected: {mode},
-            onSelectionChanged: scanning
-                ? null
-                : (value) => setState(() => mode = value.first),
-          ),
-          const SizedBox(height: 8),
           Row(
             children: [
               Expanded(
                 child: OutlinedButton.icon(
                   onPressed: scanning ? null : () => scan(ImageSource.camera),
                   icon: const Icon(Icons.photo_camera_outlined),
-                  label: Text(mode == ScanMode.menu ? '메뉴판 촬영' : '영수증 촬영'),
+                  label: const Text('영수증 촬영'),
                 ),
               ),
               const SizedBox(width: 8),
@@ -1547,14 +1506,13 @@ class _ExpensePageState extends State<ExpensePage> {
                 children: [
                   LinearProgressIndicator(),
                   SizedBox(height: 6),
-                  Text('사진을 읽는 중이에요…'),
+                  Text('영수증을 읽는 중이에요…'),
                 ],
               ),
             ),
           if (scanned != null && !scanning)
             _ScanSummary(
               receipt: scanned!,
-              fromMenu: scannedMode == ScanMode.menu,
               currentTotal: draftTotal,
               onSelectAll: () => setState(() {
                 for (final draft in items) {
@@ -1689,12 +1647,8 @@ class _ScanSummary extends StatelessWidget {
     required this.receipt,
     required this.currentTotal,
     required this.onSelectAll,
-    this.fromMenu = false,
   });
   final ScannedReceipt receipt;
-
-  /// 메뉴판에서 고른 주문이면 총액 대신 사용자가 적은 실제 결제액과 비교한다.
-  final bool fromMenu;
 
   /// 지금 입력된 항목 금액의 합. 사용자가 고치면 바뀐다.
   final int currentTotal;
@@ -1706,20 +1660,16 @@ class _ScanSummary extends StatelessWidget {
     final gap = total == null ? null : total - currentTotal;
     final discount = receipt.discountTotal;
     final names = receipt.discounts.map((d) => d.name).join(', ');
-    final what = fromMenu ? '실제 결제액' : '영수증 총액';
     final (warn, check) = switch (gap) {
-      null when fromMenu => (true, '메뉴판 가격 기준이에요. 실제 결제액과 맞는지 확인해주세요.'),
       null => (true, '영수증 총액을 읽지 못했어요. 금액을 확인해주세요.'),
-      0 => (false, '항목 합계가 $what ${money(total!)}과 같아요.'),
+      0 => (false, '항목 합계가 영수증 총액 ${money(total!)}과 같아요.'),
       > 0 => (
         true,
-        '항목 합계가 $what ${money(total!)}보다 ${money(gap)} 적어요. '
-            '${fromMenu ? '옵션이나 추가 금액을 반영해주세요.' : '빠진 메뉴가 없는지 확인해주세요.'}',
+        '항목 합계가 영수증 총액 ${money(total!)}보다 ${money(gap)} 적어요. 빠진 메뉴가 없는지 확인해주세요.',
       ),
       _ => (
         true,
-        '항목 합계가 $what ${money(total!)}보다 ${money(-gap)} 많아요. '
-            '${fromMenu ? '할인이 있었다면 금액을 고쳐주세요.' : '금액을 확인해주세요.'}',
+        '항목 합계가 영수증 총액 ${money(total!)}보다 ${money(-gap)} 많아요. 금액을 확인해주세요.',
       ),
     };
     return Card(
@@ -1732,9 +1682,7 @@ class _ScanSummary extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              fromMenu
-                  ? '메뉴판에서 고른 메뉴 ${receipt.items.length}개를 넣었어요.'
-                  : '영수증에서 메뉴 ${receipt.items.length}개를 읽었어요.',
+              '영수증에서 메뉴 ${receipt.items.length}개를 읽었어요.',
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
             if (discount > 0 && discount < receipt.itemsTotal)
@@ -1754,128 +1702,6 @@ class _ScanSummary extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-/// 메뉴판에서 읽은 메뉴 중 실제로 주문한 메뉴와 수량, 실제 결제액을 고른다.
-///
-/// 메뉴판에는 주문 내역과 결제 총액이 없으므로 사진만으로 정산을 확정하지 않는다.
-/// 확인을 누르면 고른 주문을 [ScannedReceipt]로 돌려준다.
-class MenuOrderPage extends StatefulWidget {
-  const MenuOrderPage({super.key, required this.menu});
-  final ScannedReceipt menu;
-  @override
-  State<MenuOrderPage> createState() => _MenuOrderPageState();
-}
-
-class _MenuOrderPageState extends State<MenuOrderPage> {
-  late final List<int> quantities = List.filled(widget.menu.items.length, 0);
-  final paid = TextEditingController();
-
-  @override
-  void dispose() {
-    paid.dispose();
-    super.dispose();
-  }
-
-  int get selectedTotal => [
-    for (var i = 0; i < quantities.length; i++)
-      widget.menu.items[i].amount * quantities[i],
-  ].fold(0, (a, b) => a + b);
-
-  void change(int index, int delta) => setState(
-    () => quantities[index] = (quantities[index] + delta).clamp(0, 99),
-  );
-
-  @override
-  Widget build(BuildContext context) {
-    final items = widget.menu.items;
-    final chosen = quantities.where((q) => q > 0).length;
-    return Scaffold(
-      appBar: AppBar(title: const Text('주문한 메뉴 고르기')),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
-        children: [
-          Text(
-            '${widget.menu.storeName ?? '메뉴판'}에서 메뉴 ${items.length}개를 읽었어요.',
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 4),
-          const Text(
-            '실제로 주문한 메뉴의 수량을 골라주세요. 메뉴판 가격 기준이라 옵션·할인은 '
-            '다음 화면에서 고칠 수 있어요.',
-            style: TextStyle(fontSize: 13, color: Colors.black54),
-          ),
-          const SizedBox(height: 12),
-          for (var i = 0; i < items.length; i++)
-            Card(
-              margin: const EdgeInsets.only(bottom: 8),
-              child: ListTile(
-                title: Text(items[i].name),
-                subtitle: Text(money(items[i].amount)),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      tooltip: '${items[i].name} 빼기',
-                      icon: const Icon(Icons.remove_circle_outline),
-                      onPressed: quantities[i] == 0
-                          ? null
-                          : () => change(i, -1),
-                    ),
-                    SizedBox(
-                      width: 24,
-                      child: Text(
-                        '${quantities[i]}',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: '${items[i].name} 더하기',
-                      icon: const Icon(Icons.add_circle_outline),
-                      onPressed: () => change(i, 1),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          const SizedBox(height: 8),
-          Text(
-            '고른 메뉴 $chosen개 · 메뉴판 가격 합계 ${money(selectedTotal)}',
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: paid,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-              labelText: '실제 결제액 (선택)',
-              hintText: '영수증이나 결제 문자에 적힌 금액',
-              suffixText: '원',
-            ),
-          ),
-          const SizedBox(height: 16),
-          FilledButton(
-            onPressed: chosen == 0
-                ? null
-                : () {
-                    final amount = int.tryParse(
-                      paid.text.replaceAll(RegExp(r'[^0-9]'), ''),
-                    );
-                    Navigator.pop(
-                      context,
-                      widget.menu.order(
-                        quantities,
-                        paid: amount != null && amount > 0 ? amount : null,
-                      ),
-                    );
-                  },
-            child: const Text('확인'),
-          ),
-        ],
       ),
     );
   }

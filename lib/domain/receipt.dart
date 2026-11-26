@@ -1,6 +1,3 @@
-/// 사진 종류. 영수증은 주문 내역·할인·총액을, 메뉴판은 메뉴명과 가격만 읽는다.
-enum ScanMode { receipt, menu }
-
 /// 영수증 인식 결과. 서버 함수(scan-receipt)가 돌려준 값을 담는다.
 class ScannedItem {
   const ScannedItem({
@@ -98,24 +95,6 @@ class ScannedReceipt {
         (name: items[i].label, amount: amounts[i]),
     ];
   }
-
-  /// 메뉴판에서 고른 주문. [quantities]는 메뉴별 수량(0이면 빼기), [paid]는 실제 결제액.
-  ///
-  /// 메뉴판에는 결제 총액이 없으므로, 사용자가 적은 결제액을 총액으로 삼아 비교한다.
-  ScannedReceipt order(List<int> quantities, {int? paid}) => ScannedReceipt(
-    storeName: storeName,
-    items: [
-      for (var i = 0; i < items.length; i++)
-        if (quantities[i] > 0)
-          ScannedItem(
-            name: items[i].name,
-            quantity: quantities[i],
-            unitPrice: items[i].amount,
-            amount: items[i].amount * quantities[i],
-          ),
-    ],
-    total: paid,
-  );
 
   factory ScannedReceipt.fromJson(Map<String, dynamic> json) => ScannedReceipt(
     storeName: json['storeName'] as String?,
