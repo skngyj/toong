@@ -82,17 +82,23 @@ class SettlementRecord {
     required this.name,
     required this.completedAt,
     required this.text,
+    this.room,
   });
   final String roomId;
   final String name;
   final DateTime completedAt;
   final String text;
 
+  /// 완료된 방 전체. 영수증 화면을 그릴 때 쓴다. 이 필드가 생기기 전에 저장된 기록은 null이고
+  /// 그때는 [text]로 영수증을 그린다.
+  final Room? room;
+
   factory SettlementRecord.fromRoom(Room room) => SettlementRecord(
     roomId: room.id,
     name: room.name,
     completedAt: room.completedAt!,
     text: buildRecordText(room),
+    room: room,
   );
 
   Map<String, dynamic> toJson() => {
@@ -100,6 +106,7 @@ class SettlementRecord {
     'name': name,
     'completed_at': completedAt.toUtc().toIso8601String(),
     'text': text,
+    if (room != null) 'room': room!.toJson(),
   };
   factory SettlementRecord.fromJson(Map<String, dynamic> json) =>
       SettlementRecord(
@@ -107,6 +114,9 @@ class SettlementRecord {
         name: json['name'] as String,
         completedAt: DateTime.parse(json['completed_at'] as String).toUtc(),
         text: json['text'] as String,
+        room: json['room'] is Map
+            ? Room.fromJson(Map<String, dynamic>.from(json['room'] as Map))
+            : null,
       );
   static SettlementRecord decode(String source) =>
       SettlementRecord.fromJson(jsonDecode(source) as Map<String, dynamic>);

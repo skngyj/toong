@@ -189,7 +189,8 @@ void main() {
     expect(find.text('저녁 모임 정산에서 온 기록'), findsOneWidget);
     await tester.tap(find.text('정산 기록 보기'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('[퉁 정산 기록] 저녁 모임'), findsOneWidget);
+    expect(find.text('퉁 정산서'), findsOneWidget);
+    expect(find.text('저녁 모임'), findsOneWidget);
   });
 
   testWidgets('직접 기록하고 예산의 80%를 넘으면 알려준다', (tester) async {

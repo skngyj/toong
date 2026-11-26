@@ -301,4 +301,36 @@ void main() {
     await prefs.setString('toong_actor_id', 'someone-else');
     expect(() => store.deleteRoom(room), throwsA(isA<StateError>()));
   });
+
+  test('완료 기록에 방 전체를 담아 두고, 예전 기록도 읽는다', () async {
+    SharedPreferences.setMockInitialValues({});
+    final store = LocalRoomStore();
+    var room = await store.createRoom('모임', '민수');
+    final me = room.members.single.id;
+    room = await store.saveRoom(
+      room.copyWith(
+        expenses: [
+          Expense(
+            id: 'e1',
+            title: '분식',
+            payerId: me,
+            items: [
+              LineItem(id: 'i1', name: '떡볶이', amount: 5000, memberIds: [me]),
+            ],
+          ),
+        ],
+      ),
+    );
+    room = await store.completeRoom(room);
+    final record = SettlementRecord.fromRoom(room);
+    final back = SettlementRecord.decode(record.encode());
+    expect(back.room!.expenses.single.title, '분식');
+    expect(back.room!.completedAt, room.completedAt);
+
+    final old = SettlementRecord.decode(
+      '{"room_id":"r","name":"옛 방","completed_at":"2026-11-01T00:00:00Z","text":"[퉁 정산 기록] 옛 방"}',
+    );
+    expect(old.room, isNull);
+    expect(old.text, startsWith('[퉁 정산 기록]'));
+  });
 }

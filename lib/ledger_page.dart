@@ -5,12 +5,13 @@ import 'app.dart';
 import 'data/ledger_store.dart';
 import 'data/record_store.dart';
 import 'domain/ledger.dart';
+import 'theme.dart';
 import 'data/room_store.dart' show newId;
 
-const _warnColor = Color(0xFFFFF1E6);
-const _overColor = Color(0xFFE5484D);
-const _okColor = Color(0xFFC8EE7D);
-const _softColor = Color(0xFFECF1E6);
+const _warnColor = toongWarn;
+const _overColor = toongDanger;
+const _okColor = toongInk;
+const _softColor = toongSoft;
 
 /// 예산 알림 창. 문구가 없으면 아무것도 하지 않는다.
 Future<void> showBudgetAlert(BuildContext context, String? message) async {
@@ -198,7 +199,7 @@ class _LedgerPageState extends State<LedgerPage> {
                     child: Text(
                       '이 달의 기록이 없어요.\n정산을 완료하면 내 부담액이 자동으로 기록돼요.',
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.black54),
+                      style: TextStyle(color: toongSub),
                     ),
                   ),
                 for (final e in monthly)
@@ -224,7 +225,7 @@ class _LedgerPageState extends State<LedgerPage> {
                   ),
                 const Text(
                   '가계부는 이 기기에만 저장돼요. 앱을 삭제하거나 기기를 바꾸면 사라집니다.',
-                  style: TextStyle(fontSize: 12, color: Colors.black54),
+                  style: TextStyle(fontSize: 12, color: toongSub),
                 ),
               ],
             ),
@@ -254,7 +255,7 @@ class _SummaryCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('쓴 돈', style: TextStyle(color: Colors.black54)),
+            const Text('쓴 돈', style: TextStyle(color: toongSub)),
             Text(
               money(spent),
               style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800),

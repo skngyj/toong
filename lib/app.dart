@@ -14,12 +14,12 @@ import 'domain/receipt.dart';
 import 'domain/record.dart';
 import 'domain/settlement.dart';
 import 'ledger_page.dart';
+import 'receipt_view.dart';
+import 'theme.dart';
 
-const _ink = Color(0xFF213025);
-const _lime = Color(0xFFC8EE7D);
-const _canvas = Color(0xFFF6F8F3);
-const _soft = Color(0xFFECF1E6);
-const _danger = Color(0xFFE5484D);
+const _ink = toongInk;
+const _soft = toongSoft;
+const _danger = toongDanger;
 
 String money(int value) =>
     '${value.toString().replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => ',')}원';
@@ -91,39 +91,7 @@ class _ToongAppState extends State<ToongApp> {
     navigatorKey: navigator,
     title: '퉁',
     debugShowCheckedModeBanner: false,
-    theme: ThemeData(
-      useMaterial3: true,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: _lime,
-        primary: _ink,
-        surface: _canvas,
-      ),
-      scaffoldBackgroundColor: _canvas,
-      appBarTheme: const AppBarTheme(
-        backgroundColor: _canvas,
-        foregroundColor: _ink,
-        centerTitle: false,
-      ),
-      filledButtonTheme: FilledButtonThemeData(
-        style: FilledButton.styleFrom(
-          backgroundColor: _lime,
-          foregroundColor: _ink,
-          minimumSize: const Size(double.infinity, 54),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-          ),
-        ),
-      ),
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: Colors.white,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 14,
-        ),
-      ),
-    ),
+    theme: toongTheme(),
     home: HomePage(store: store),
   );
 }
@@ -259,7 +227,7 @@ class _TextDialogState extends State<_TextDialog> {
           if (widget.help != null)
             Text(
               widget.help!,
-              style: const TextStyle(fontSize: 13, color: Colors.black54),
+              style: const TextStyle(fontSize: 13, color: toongSub),
             ),
         ],
       ),
@@ -327,6 +295,17 @@ class HomePage extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const Spacer(flex: 2),
+            // 앱 아이콘과 같은 4조각 '퉁' 로고.
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Image.asset(
+                'assets/logo.png',
+                width: 64,
+                height: 64,
+                semanticLabel: '퉁 로고',
+              ),
+            ),
+            const SizedBox(height: 22),
             const Text(
               '복잡한 정산,\n퉁으로 끝.',
               style: TextStyle(
@@ -617,7 +596,7 @@ class _RoomListPageState extends State<RoomListPage> {
                 padding: EdgeInsets.only(bottom: 8),
                 child: Text(
                   '이 기기에만 저장돼 있어요. 앱을 삭제하거나 기기를 바꾸면 사라집니다.',
-                  style: TextStyle(fontSize: 13, color: Colors.black54),
+                  style: TextStyle(fontSize: 13, color: toongSub),
                 ),
               ),
             ],
@@ -671,7 +650,9 @@ class RecordPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Scaffold(
+    backgroundColor: toongSoft,
     appBar: AppBar(
+      backgroundColor: toongSoft,
       title: const Text('정산 기록'),
       actions: [
         IconButton(
@@ -682,18 +663,15 @@ class RecordPage extends StatelessWidget {
       ],
     ),
     body: ListView(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+      padding: const EdgeInsets.fromLTRB(24, 12, 24, 28),
       children: [
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(18),
-            child: SelectableText(
-              record.text,
-              style: const TextStyle(height: 1.5),
-            ),
-          ),
+        // 완료된 정산은 영수증 모양으로 보여준다. 예전 기록은 저장된 글자로 그린다.
+        ReceiptPaper(
+          child: record.room != null
+              ? ReceiptContent(room: record.room!)
+              : ReceiptTextContent(text: record.text),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 20),
         FilledButton.icon(
           onPressed: () async {
             await Clipboard.setData(ClipboardData(text: record.text));
@@ -880,6 +858,16 @@ class _RoomPageState extends State<RoomPage> {
     await act(
       widget.store.completeRoom,
       '정산을 완료했어요. 정산 기록과 내 부담액(가계부)을 이 기기에 저장했어요.',
+    );
+    final done = room;
+    if (!mounted || done == null || !done.isCompleted) return;
+    // 영수증이 출력기에서 나와 뜯기는 화면.
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => PrintReceiptPage(room: done),
+      ),
     );
   }
 
@@ -1140,7 +1128,7 @@ class _RoomPageState extends State<RoomPage> {
                     child: Text(
                       '체험 모드 · 이 기기에만 저장됩니다. 다른 기기와 연결하려면 서버 설정이 필요해요.',
                       textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 12, color: Colors.black54),
+                      style: TextStyle(fontSize: 12, color: toongSub),
                     ),
                   ),
               ],
@@ -1192,7 +1180,7 @@ class _ExpiryCard extends StatelessWidget {
       _ => (Icons.timer_outlined, left, roomExpiryNotice),
     };
     return Card(
-      color: expired || urgent ? const Color(0xFFFFF1E6) : _soft,
+      color: expired || urgent ? toongWarn : _soft,
       elevation: 0,
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -1212,7 +1200,7 @@ class _ExpiryCard extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(
                     body,
-                    style: const TextStyle(fontSize: 13, color: Colors.black54),
+                    style: const TextStyle(fontSize: 13, color: toongSub),
                   ),
                   if (onExtend != null || onFreeze != null || onThaw != null)
                     Padding(
@@ -1674,7 +1662,7 @@ class _ScanSummary extends StatelessWidget {
     };
     return Card(
       margin: const EdgeInsets.only(top: 12),
-      color: warn ? const Color(0xFFFFF1E6) : _soft,
+      color: warn ? toongWarn : _soft,
       elevation: 0,
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -1693,7 +1681,7 @@ class _ScanSummary extends StatelessWidget {
             const SizedBox(height: 4),
             const Text(
               '인식 결과가 틀릴 수 있어요. 항목을 확인하고 먹은 사람을 골라주세요.',
-              style: TextStyle(fontSize: 13, color: Colors.black54),
+              style: TextStyle(fontSize: 13, color: toongSub),
             ),
             TextButton.icon(
               onPressed: onSelectAll,
@@ -1810,7 +1798,7 @@ class _DrawDialogState extends State<DrawDialog>
               height: 88,
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: done ? _lime : _soft,
+                color: done ? _ink : _soft,
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(
@@ -1818,10 +1806,10 @@ class _DrawDialogState extends State<DrawDialog>
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 key: const Key('draw-slot'),
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 30,
                   fontWeight: FontWeight.w800,
-                  color: _ink,
+                  color: done ? Colors.white : _ink,
                 ),
               ),
             ),
@@ -1948,7 +1936,7 @@ class _RemainderPageState extends State<RemainderPage> {
                   children: [
                     Text(
                       entry.expense.title,
-                      style: const TextStyle(color: Colors.black54),
+                      style: const TextStyle(color: toongSub),
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -1984,7 +1972,7 @@ class _RemainderPageState extends State<RemainderPage> {
                       const SizedBox(height: 6),
                       const Text(
                         '또는 직접 고르기',
-                        style: TextStyle(fontSize: 13, color: Colors.black54),
+                        style: TextStyle(fontSize: 13, color: toongSub),
                       ),
                       const SizedBox(height: 4),
                     ],
@@ -2096,7 +2084,7 @@ class SettlementPage extends StatelessWidget {
           const SizedBox(height: 10),
           const Text(
             '송금은 사용 중인 은행 앱에서 진행해주세요.',
-            style: TextStyle(color: Colors.black54),
+            style: TextStyle(color: toongSub),
           ),
           const SizedBox(height: 24),
           ExpansionTile(
@@ -2120,7 +2108,7 @@ class SettlementPage extends StatelessWidget {
               padding: EdgeInsets.only(top: 16),
               child: Text(
                 '미연결 과거 참여자가 포함돼 있어요. 송금 대상과 금액을 확인해주세요.',
-                style: TextStyle(color: Colors.black54),
+                style: TextStyle(color: toongSub),
               ),
             ),
         ],
