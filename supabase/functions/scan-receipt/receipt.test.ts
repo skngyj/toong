@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   buildGeminiRequest,
-  normalizeMenu,
   normalizeReceipt,
   parseGeminiResponse,
 } from "./receipt.ts";
@@ -80,38 +79,4 @@ test("읽지 못한 값은 null, 빈 응답은 예외", () => {
   assert.deepEqual(receipt, { storeName: null, items: [], discounts: [], total: null });
   assert.throws(() => parseGeminiResponse({ candidates: [] }));
   assert.throws(() => parseGeminiResponse({ candidates: [{ content: { parts: [{ text: "{" }] } }] }));
-});
-
-test("메뉴판 모드는 메뉴판 프롬프트와 스키마를 쓴다", () => {
-  const { init } = buildGeminiRequest({
-    apiKey: "key",
-    model: "m",
-    imageBase64: "AAAA",
-    mimeType: "image/jpeg",
-    mode: "menu",
-  });
-  const body = JSON.parse(init.body as string);
-  assert.match(body.contents[0].parts[1].text, /메뉴판/);
-  assert.deepEqual(body.generationConfig.responseSchema.required, ["items"]);
-});
-
-test("메뉴판 결과를 수량 1, 가격 그대로인 항목으로 정리한다", () => {
-  const menu = parseGeminiResponse(geminiPayload({
-    storeName: "분식 퉁퉁",
-    items: [
-      { name: "떡볶이", price: 5000 },
-      { name: "떡볶이", price: 5000 },
-      { name: "아메리카노(L)", price: "4,500원" },
-      { name: "", price: 3000 },
-      { name: "김밥", price: 0 },
-    ],
-  }), "menu");
-  assert.equal(menu.storeName, "분식 퉁퉁");
-  assert.deepEqual(menu.items, [
-    { name: "떡볶이", quantity: 1, unitPrice: 5000, amount: 5000 },
-    { name: "아메리카노(L)", quantity: 1, unitPrice: 4500, amount: 4500 },
-  ]);
-  assert.deepEqual(menu.discounts, []);
-  assert.equal(menu.total, null);
-  assert.deepEqual(normalizeMenu(null).items, []);
 });

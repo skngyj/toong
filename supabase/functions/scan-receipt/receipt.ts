@@ -1,4 +1,4 @@
-// 영수증·메뉴판 인식의 순수 로직: Gemini 요청 만들기와 응답 정리.
+// 영수증 인식의 순수 로직: Gemini 요청 만들기와 응답 정리.
 // Deno(Edge Function)와 Node(테스트) 양쪽에서 쓰므로 런타임 전용 API를 쓰지 않는다.
 
 export const DEFAULT_MODEL = "gemini-3.5-flash-lite";
@@ -31,10 +31,6 @@ export interface ReceiptDiscount {
   amount: number;
 }
 
-/** receipt: 영수증(주문 내역·할인·총액), menu: 메뉴판(메뉴명·가격만). */
-export type ScanMode = "receipt" | "menu";
-export const SCAN_MODES: ScanMode[] = ["receipt", "menu"];
-
 export interface ScannedReceipt {
   storeName: string | null;
   items: ReceiptItem[];
@@ -50,33 +46,6 @@ const PROMPT = [
   "4) 금액은 쉼표 없는 원 단위 정수입니다. total은 영수증에 적힌 최종 결제 금액입니다.",
   "5) 읽을 수 없는 값은 지어내지 말고 null로 둡니다. 영수증이 아니면 items를 빈 배열로 둡니다.",
 ].join(" ");
-
-const MENU_PROMPT = [
-  "이 메뉴판 사진에서 메뉴 이름과 가격을 읽어 주세요. 규칙:",
-  "1) items에는 가격이 적힌 메뉴만 넣습니다. 가게 이름, 설명 문구, 원산지 표시는 넣지 않습니다.",
-  "2) 크기나 온도에 따라 가격이 다르면 '아메리카노(L)'처럼 이름에 붙여 각각 넣습니다.",
-  "3) price는 쉼표 없는 원 단위 정수입니다. '4.5'처럼 천 원 단위로 적혀 있으면 4500으로 바꿉니다.",
-  "4) 읽을 수 없는 값은 지어내지 말고 넣지 않습니다. 메뉴판이 아니면 items를 빈 배열로 둡니다.",
-].join(" ");
-
-const MENU_SCHEMA = {
-  type: "OBJECT",
-  properties: {
-    storeName: { type: "STRING", nullable: true },
-    items: {
-      type: "ARRAY",
-      items: {
-        type: "OBJECT",
-        properties: {
-          name: { type: "STRING" },
-          price: { type: "INTEGER" },
-        },
-        required: ["name", "price"],
-      },
-    },
-  },
-  required: ["items"],
-};
 
 const RESPONSE_SCHEMA = {
   type: "OBJECT",
@@ -117,21 +86,19 @@ export function buildGeminiRequest(options: {
   model: string;
   imageBase64: string;
   mimeType: string;
-  mode?: ScanMode;
 }): { url: string; init: RequestInit } {
-  const menu = options.mode === "menu";
   const url =
     `https://generativelanguage.googleapis.com/v1beta/models/${options.model}:generateContent`;
   const body = {
     contents: [{
       parts: [
         { inline_data: { mime_type: options.mimeType, data: options.imageBase64 } },
-        { text: menu ? MENU_PROMPT : PROMPT },
+        { text: PROMPT },
       ],
     }],
     generationConfig: {
       responseMimeType: "application/json",
-      responseSchema: menu ? MENU_SCHEMA : RESPONSE_SCHEMA,
+      responseSchema: RESPONSE_SCHEMA,
       temperature: 0,
     },
   };
@@ -149,18 +116,14 @@ export function buildGeminiRequest(options: {
 }
 
 /** Gemini 응답 본문에서 모델이 만든 JSON을 꺼내 정리한다. 형식이 맞지 않으면 예외를 던진다. */
-export function parseGeminiResponse(
-  payload: unknown,
-  mode: ScanMode = "receipt",
-): ScannedReceipt {
+export function parseGeminiResponse(payload: unknown): ScannedReceipt {
   const parts = (payload as {
     candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[];
   })?.candidates?.[0]?.content?.parts ?? [];
   const text = parts.filter((p) => !p.thought && typeof p.text === "string")
     .map((p) => p.text).join("");
   if (!text) throw new Error("empty model response");
-  const raw = JSON.parse(text);
-  return mode === "menu" ? normalizeMenu(raw) : normalizeReceipt(raw);
+  return normalizeReceipt(JSON.parse(text));
 }
 
 /** 기호가 섞이거나 문자열로 온 숫자도 정수로 바꾼다. 바꿀 수 없으면 null. */
@@ -221,27 +184,4 @@ export function normalizeReceipt(raw: unknown): ScannedReceipt {
     discounts,
     total: total !== null && total > 0 && total <= MAX_AMOUNT ? total : null,
   };
-}
-
-/**
- * 메뉴판 결과를 영수증과 같은 모양으로 정리한다. 메뉴마다 수량 1, 금액은 메뉴 가격이며
- * 할인과 총액은 없다. 같은 이름과 가격이 두 번 나오면 하나만 남긴다.
- */
-export function normalizeMenu(raw: unknown): ScannedReceipt {
-  const data = (raw ?? {}) as Record<string, unknown>;
-  const items: ReceiptItem[] = [];
-  const seen = new Set<string>();
-  for (const entry of Array.isArray(data.items) ? data.items : []) {
-    const row = (entry ?? {}) as Record<string, unknown>;
-    const name = cleanName(row.name);
-    const price = toInt(row.price);
-    if (!name || price === null || price < 1 || price > MAX_AMOUNT) continue;
-    const key = `${name}|${price}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    items.push({ name, quantity: 1, unitPrice: price, amount: price });
-    if (items.length === MAX_ITEMS) break;
-  }
-  const storeName = cleanName(data.storeName);
-  return { storeName: storeName || null, items, discounts: [], total: null };
 }
