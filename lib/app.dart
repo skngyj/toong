@@ -253,6 +253,19 @@ class _TextDialogState extends State<_TextDialog> {
   );
 }
 
+/// 아직 송금 완료로 체크하지 않은 송금 수. 잔돈 부담자가 정해지지 않아 정산을 계산할 수
+/// 없으면 0(완료 자체가 막히므로 따로 묻지 않는다).
+int unpaidTransfers(Room room) {
+  if (room.pendingRemainder > 0 || room.expenses.isEmpty) return 0;
+  try {
+    return calculateSettlement(room).transfers
+        .where((t) => !room.isPaid(t.from, t.to, t.amount))
+        .length;
+  } on StateError {
+    return 0;
+  }
+}
+
 /// 완료된 방을 이 기기에 남긴다. 정산 기록을 저장하고, 내 부담액을 가계부에
 /// 지출 한 건당 한 줄로 넣는다. 그 때문에 이번 달 예산 단계를 넘었으면 알림 문구를 돌려준다.
 Future<String?> keepCompleted(RoomStore store, Room room) async {
@@ -901,6 +914,17 @@ class _RoomPageState extends State<RoomPage> {
           '삭제되고, 정산 기록은 각자 기기에 저장됩니다. 친구들은 '
           '${roomCompletedLimit.inHours}시간 안에 이 방을 열어야 기록이 저장돼요.',
     )) {
+      return;
+    }
+    // 아직 송금 완료로 체크하지 않은 송금이 있으면 한 번 더 묻는다.
+    final unpaid = unpaidTransfers(room!);
+    if (unpaid > 0 &&
+        mounted &&
+        !await confirm(
+          '아직 체크하지 않은 송금이 있어요',
+          '송금 완료로 체크하지 않은 송금이 $unpaid건 있어요. 그래도 정산을 완료할까요? '
+              '완료한 뒤에도 정산 결과에서 체크할 수 있어요.',
+        )) {
       return;
     }
     await act(

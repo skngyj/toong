@@ -246,8 +246,11 @@ class ReceiptStamp extends StatelessWidget {
 
 /// 완료된 방의 정산서. 보낼 돈, 지출 내역, 개인별 결제·부담, 총액을 영수증처럼 보여준다.
 class ReceiptContent extends StatelessWidget {
-  const ReceiptContent({super.key, required this.room});
+  const ReceiptContent({super.key, required this.room, this.showPaid = true});
   final Room room;
+
+  /// 송금 완료 체크(✓)를 보여줄지. 정산 완료 직후 출력되는 정산서에는 보여주지 않는다.
+  final bool showPaid;
 
   @override
   Widget build(BuildContext context) {
@@ -287,12 +290,13 @@ class ReceiptContent extends StatelessWidget {
           const Text('주고받을 돈이 없어요.', style: TextStyle(color: toongSub)),
         for (final t in result.transfers)
           ReceiptLine(
-            '${room.isPaid(t.from, t.to, t.amount) ? '✓ ' : ''}'
+            '${showPaid && room.isPaid(t.from, t.to, t.amount) ? '✓ ' : ''}'
             '${room.memberName(t.from)} → ${room.memberName(t.to)}',
             _won(t.amount),
             bold: true,
           ),
-        if (result.transfers.any((t) => room.isPaid(t.from, t.to, t.amount)))
+        if (showPaid &&
+            result.transfers.any((t) => room.isPaid(t.from, t.to, t.amount)))
           const Text(
             '✓ 송금 완료',
             style: TextStyle(fontSize: 11.5, color: toongSub),
@@ -545,7 +549,7 @@ class _PrintReceiptPageState extends State<PrintReceiptPage>
     final shake = feed.isAnimating && lastStep.isOdd ? 0.8 : 0.0;
     final paper = ReceiptPaper(
       tornTop: torn,
-      child: ReceiptContent(room: widget.room),
+      child: ReceiptContent(room: widget.room, showPaid: false),
     );
     return Scaffold(
       backgroundColor: toongSoft,
