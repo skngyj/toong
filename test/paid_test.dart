@@ -153,4 +153,77 @@ void main() {
     final saved = await store.getRoom(room.id);
     expect(saved.paidTransfers, isEmpty);
   });
+
+  testWidgets('체크하지 않은 송금이 있으면 정산 완료 때 한 번 더 묻는다', (tester) async {
+    final (store, room, _) = await setup();
+    // 지수→민수만 체크해 둔다.
+    await actAs('a-jisu');
+    final first = calculateSettlement(room).transfers.first;
+    var marked = await store.markTransfer(room, first, paid: true);
+    final prefs = await SharedPreferences.getInstance();
+    final owner = (await store.getRoom(room.id)).members.first.actorId!;
+    await prefs.setString('toong_actor_id', owner);
+    expect(unpaidTransfers(marked), 1);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RoomPage(store: store, roomId: room.id),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('정산 완료'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('정산 완료'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '확인'));
+    await tester.pumpAndSettle();
+    expect(find.text('아직 체크하지 않은 송금이 있어요'), findsOneWidget);
+    expect(find.textContaining('체크하지 않은 송금이 1건'), findsOneWidget);
+    // 취소하면 완료하지 않는다.
+    await tester.tap(find.widgetWithText(FilledButton, '취소'));
+    await tester.pumpAndSettle();
+    expect((await store.getRoom(room.id)).isCompleted, isFalse);
+
+    // 다시 눌러 두 번 모두 확인하면 완료되고, 출력되는 정산서에는 체크 표시가 없다.
+    await tester.tap(find.text('정산 완료'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '확인'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '확인'));
+    await tester.pumpAndSettle();
+    expect((await store.getRoom(room.id)).isCompleted, isTrue);
+    expect(find.text('퉁 정산서'), findsOneWidget);
+    expect(find.textContaining('✓'), findsNothing);
+    marked = await store.getRoom(room.id);
+    expect(marked.paidTransfers, hasLength(1));
+  });
+
+  testWidgets('모두 체크했으면 정산 완료 때 따로 묻지 않는다', (tester) async {
+    final (store, room, owner) = await setup();
+    var r = room;
+    for (final t in calculateSettlement(room).transfers) {
+      r = await store.markTransfer(r, t, paid: true);
+    }
+    expect(unpaidTransfers(r), 0);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RoomPage(store: store, roomId: room.id),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('정산 완료'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('정산 완료'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '확인'));
+    await tester.pumpAndSettle();
+    expect(find.text('아직 체크하지 않은 송금이 있어요'), findsNothing);
+    expect((await store.getRoom(room.id)).isCompleted, isTrue);
+  });
 }
