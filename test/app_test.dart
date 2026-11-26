@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:toong/app.dart';
+import 'package:toong/freeze_effect.dart';
 import 'package:toong/data/room_store.dart';
 import 'package:toong/domain/models.dart';
 import 'package:toong/receipt_view.dart';
@@ -126,12 +127,16 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, '확인'));
     await tester.pumpAndSettle();
     expect(find.textContaining('얼린 방 · 삭제까지'), findsOneWidget);
+    // 얼음 효과는 남은 시간 상자에만 입힌다.
+    expect(find.byType(IceBox), findsOneWidget);
+    expect(tester.widget<IceBox>(find.byType(IceBox)).frozen, isTrue);
     expect(find.text('지출 추가'), findsNothing);
     expect(find.text('정산 완료'), findsNothing);
 
     await tester.tap(find.text('녹이기'));
     await tester.pumpAndSettle();
     expect(find.textContaining('얼린 방'), findsNothing);
+    expect(tester.widget<IceBox>(find.byType(IceBox)).frozen, isFalse);
     expect(find.text('연장 (2회 남음)'), findsOneWidget);
   });
 

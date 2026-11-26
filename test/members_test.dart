@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:toong/app.dart';
+import 'package:toong/theme.dart';
 import 'package:toong/data/room_store.dart';
 import 'package:toong/domain/models.dart';
 
@@ -125,6 +126,11 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, '확인'));
     await tester.pumpAndSettle();
     expect(find.text('현우 · 미연결'), findsOneWidget);
+    // 방장이 추가한 사람의 "미연결"은 빨간 글씨다.
+    final label = tester.widget<Text>(find.text('현우 · 미연결'));
+    final unlinked = (label.textSpan! as TextSpan).children!.single as TextSpan;
+    expect(unlinked.text, ' · 미연결');
+    expect(unlinked.style!.color, toongDanger);
     expect((await store.getRoom(room.id)).members, hasLength(2));
 
     await tester.tap(find.byTooltip('현우 빼기'));
