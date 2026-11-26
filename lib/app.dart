@@ -15,6 +15,7 @@ import 'domain/record.dart';
 import 'domain/settlement.dart';
 import 'freeze_effect.dart';
 import 'ledger_page.dart';
+import 'qr_page.dart';
 import 'receipt_view.dart';
 import 'theme.dart';
 
@@ -413,13 +414,26 @@ class _EntryPageState extends State<EntryPage> {
   final form = GlobalKey<FormState>();
   late final name = TextEditingController(text: widget.initialCode);
   final nickname = TextEditingController();
+  final nicknameFocus = FocusNode();
   bool busy = false;
 
   @override
   void dispose() {
     name.dispose();
     nickname.dispose();
+    nicknameFocus.dispose();
     super.dispose();
+  }
+
+  /// 친구 휴대폰의 방 QR을 찍어 방 코드를 채운다. 입장은 닉네임을 넣고 직접 누른다.
+  Future<void> scan() async {
+    final code = await scanRoomQr(context);
+    if (code == null || !mounted) return;
+    setState(() => name.text = code);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('QR에서 방 코드 $code를 읽었어요. 닉네임을 넣고 입장하세요.')),
+    );
+    if (nickname.text.trim().isEmpty) nicknameFocus.requestFocus();
   }
 
   Future<void> submit() async {
@@ -472,12 +486,20 @@ class _EntryPageState extends State<EntryPage> {
             decoration: InputDecoration(
               labelText: widget.creating ? '방 이름' : '방 코드',
               hintText: widget.creating ? '금요일 저녁 모임' : '예: ABC2345',
+              suffixIcon: widget.creating
+                  ? null
+                  : IconButton(
+                      onPressed: scan,
+                      tooltip: 'QR 스캔',
+                      icon: const Icon(Icons.qr_code_scanner),
+                    ),
             ),
             validator: (v) => (v?.trim().isEmpty ?? true) ? '입력해주세요.' : null,
           ),
           const SizedBox(height: 8),
           TextFormField(
             controller: nickname,
+            focusNode: nicknameFocus,
             maxLength: 12,
             decoration: const InputDecoration(
               labelText: '내 닉네임',
@@ -1006,6 +1028,15 @@ class _RoomPageState extends State<RoomPage> {
                               icon: const Icon(Icons.copy),
                               tooltip: '방 코드 복사',
                             ),
+                            // 새 참여자가 들어올 수 있는 방에서만 입장 QR을 보여준다.
+                            if (!r.isFrozen &&
+                                !r.isCompleted &&
+                                !r.isExpiredAt(now))
+                              IconButton(
+                                onPressed: () => showRoomQr(context, r),
+                                icon: const Icon(Icons.qr_code_2),
+                                tooltip: '입장 QR 보기',
+                              ),
                           ],
                         ),
                         TextButton.icon(
