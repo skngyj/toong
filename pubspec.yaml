@@ -63,6 +63,13 @@ flutter:
 
   assets:
     - assets/logo.png
+  # 영수증 화면의 고정폭 한글 글꼴(나눔고딕코딩, SIL OFL 1.1 — assets/fonts/NanumGothicCoding-OFL.txt).
+  fonts:
+    - family: ReceiptMono
+      fonts:
+        - asset: assets/fonts/NanumGothicCoding-Regular.ttf
+        - asset: assets/fonts/NanumGothicCoding-Bold.ttf
+          weight: 700
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg

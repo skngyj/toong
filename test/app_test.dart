@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:toong/app.dart';
 import 'package:toong/data/room_store.dart';
 import 'package:toong/domain/models.dart';
+import 'package:toong/receipt_view.dart';
 
 void main() {
   testWidgets('시작 화면과 게스트 주의 안내가 보인다', (tester) async {
@@ -154,6 +155,19 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('정산을 완료할까요?'), findsOneWidget);
     await tester.tap(find.widgetWithText(FilledButton, '확인'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    // 영수증이 출력기에서 끊기며 나오는 중에는 확인 버튼이 없다.
+    expect(find.byType(PrintReceiptPage), findsOneWidget);
+    expect(find.text('영수증 출력 중… 누르면 건너뛰어요'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, '확인'), findsNothing);
+    await tester.pumpAndSettle();
+    expect(find.text('퉁 정산서'), findsOneWidget);
+    expect(find.text('정산완료'), findsOneWidget);
+    await tester.ensureVisible(find.widgetWithText(FilledButton, '확인'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '확인'));
     await tester.pumpAndSettle();
     expect(find.text('지출 추가'), findsNothing);
     expect(find.text('정산 기록 보기'), findsOneWidget);
@@ -167,8 +181,11 @@ void main() {
     expect(find.text('완료된 정산 기록'), findsOneWidget);
     await tester.tap(find.text('저녁 모임'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('[퉁 정산 기록] 저녁 모임'), findsOneWidget);
-    expect(find.textContaining('1. 음식점 · 결제 민수 · 10,000원'), findsOneWidget);
+    // 저장된 기록은 영수증 모양으로 보인다.
+    expect(find.text('퉁 정산서'), findsOneWidget);
+    expect(find.text('주고받을 돈이 없어요.'), findsOneWidget);
+    expect(find.text('음식점'), findsOneWidget);
+    expect(find.text('10,000원'), findsOneWidget);
     await tester.tap(find.text('기록 복사'));
     await tester.pumpAndSettle();
     expect(copied.single, contains('- 주고받을 돈이 없습니다.'));

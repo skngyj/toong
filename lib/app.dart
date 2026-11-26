@@ -14,6 +14,7 @@ import 'domain/receipt.dart';
 import 'domain/record.dart';
 import 'domain/settlement.dart';
 import 'ledger_page.dart';
+import 'receipt_view.dart';
 import 'theme.dart';
 
 const _ink = toongInk;
@@ -649,7 +650,9 @@ class RecordPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Scaffold(
+    backgroundColor: toongSoft,
     appBar: AppBar(
+      backgroundColor: toongSoft,
       title: const Text('정산 기록'),
       actions: [
         IconButton(
@@ -660,18 +663,15 @@ class RecordPage extends StatelessWidget {
       ],
     ),
     body: ListView(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+      padding: const EdgeInsets.fromLTRB(24, 12, 24, 28),
       children: [
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(18),
-            child: SelectableText(
-              record.text,
-              style: const TextStyle(height: 1.5),
-            ),
-          ),
+        // 완료된 정산은 영수증 모양으로 보여준다. 예전 기록은 저장된 글자로 그린다.
+        ReceiptPaper(
+          child: record.room != null
+              ? ReceiptContent(room: record.room!)
+              : ReceiptTextContent(text: record.text),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 20),
         FilledButton.icon(
           onPressed: () async {
             await Clipboard.setData(ClipboardData(text: record.text));
@@ -858,6 +858,16 @@ class _RoomPageState extends State<RoomPage> {
     await act(
       widget.store.completeRoom,
       '정산을 완료했어요. 정산 기록과 내 부담액(가계부)을 이 기기에 저장했어요.',
+    );
+    final done = room;
+    if (!mounted || done == null || !done.isCompleted) return;
+    // 영수증이 출력기에서 나와 뜯기는 화면.
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => PrintReceiptPage(room: done),
+      ),
     );
   }
 
