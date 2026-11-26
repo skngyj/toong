@@ -287,9 +287,15 @@ class ReceiptContent extends StatelessWidget {
           const Text('주고받을 돈이 없어요.', style: TextStyle(color: toongSub)),
         for (final t in result.transfers)
           ReceiptLine(
+            '${room.isPaid(t.from, t.to, t.amount) ? '✓ ' : ''}'
             '${room.memberName(t.from)} → ${room.memberName(t.to)}',
             _won(t.amount),
             bold: true,
+          ),
+        if (result.transfers.any((t) => room.isPaid(t.from, t.to, t.amount)))
+          const Text(
+            '✓ 송금 완료',
+            style: TextStyle(fontSize: 11.5, color: toongSub),
           ),
         const ReceiptDivider(),
         const Text('지출 내역', style: TextStyle(fontWeight: FontWeight.w700)),

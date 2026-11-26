@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../domain/models.dart';
+import '../domain/settlement.dart';
 import 'receipt_scanner.dart';
 
 String newId() {
@@ -46,6 +47,10 @@ abstract class RoomStore {
 
   /// 방장이 참여자를 뺀다. 방장과 지출에 들어간 사람은 뺄 수 없다.
   Future<Room> removeMember(Room room, String memberId);
+
+  /// 송금 완료를 표시하거나([paid]가 true) 푼다. 보내는 사람, 받는 사람, 방장만 할 수 있고
+  /// 얼린 방·완료된 방에서도 된다. 마지막 입력 시각은 바꾸지 않는다.
+  Future<Room> markTransfer(Room room, Transfer transfer, {required bool paid});
 }
 
 /// 한 방에 있을 수 있는 최대 인원.
@@ -146,6 +151,47 @@ class LocalRoomStore implements RoomStore {
     }
     return current.copyWith(completedAt: _now);
   });
+
+  @override
+  Future<Room> markTransfer(
+    Room room,
+    Transfer transfer, {
+    required bool paid,
+  }) async {
+    final rooms = await _all();
+    final index = rooms.indexWhere((r) => r.id == room.id);
+    if (index < 0) throw StateError(roomMissingMessage);
+    final current = _live(rooms[index]);
+    final actor = await actorId();
+    final me = current.actorMember(actor);
+    if (me == null) throw StateError('참여 중인 방만 표시할 수 있어요.');
+    if (me.id != transfer.from &&
+        me.id != transfer.to &&
+        !current.owns(actor)) {
+      throw StateError('보내는 사람, 받는 사람, 방장만 표시할 수 있어요.');
+    }
+    final marks = current.paidTransfers
+        .where((m) => !(m.from == transfer.from && m.to == transfer.to))
+        .toList();
+    if (paid) {
+      marks.add(
+        PaidTransfer(
+          from: transfer.from,
+          to: transfer.to,
+          amount: transfer.amount,
+          by: me.id,
+          at: _now,
+        ),
+      );
+    }
+    final updated = current.copyWith(
+      paidTransfers: marks,
+      version: current.version + 1,
+    );
+    rooms[index] = updated;
+    await _write(rooms);
+    return updated;
+  }
 
   @override
   Future<Room> addMember(Room room, String name) =>
@@ -493,6 +539,27 @@ class CloudRoomStore implements RoomStore {
   @override
   Future<Room> completeRoom(Room room) =>
       _roomAction('complete_toong_room', room);
+
+  @override
+  Future<Room> markTransfer(
+    Room room,
+    Transfer transfer, {
+    required bool paid,
+  }) async {
+    await _signIn();
+    return _room(
+      await client.rpc(
+        'mark_toong_transfer',
+        params: {
+          'p_room_id': room.id,
+          'p_from': transfer.from,
+          'p_to': transfer.to,
+          'p_amount': transfer.amount,
+          'p_paid': paid,
+        },
+      ),
+    );
+  }
 
   @override
   Future<Room> addMember(Room room, String name) async {

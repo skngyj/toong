@@ -230,7 +230,7 @@ void main() {
     expect(find.text('친구 방'), findsOneWidget);
   });
 
-  testWidgets('확인·취소는 같은 크기로 좌우에 있고 취소는 빨간 버튼이다', (tester) async {
+  testWidgets('확인은 왼쪽, 취소는 오른쪽에 같은 크기로 있고 취소는 빨간 버튼이다', (tester) async {
     SharedPreferences.setMockInitialValues({});
     await tester.pumpWidget(ToongApp(store: LocalRoomStore()));
     await tester.tap(find.text('새방 만들기'));
@@ -239,7 +239,7 @@ void main() {
     final ok = find.widgetWithText(FilledButton, '확인');
     expect(tester.getSize(cancel), tester.getSize(ok));
     expect(tester.getCenter(cancel).dy, tester.getCenter(ok).dy);
-    expect(tester.getCenter(cancel).dx, lessThan(tester.getCenter(ok).dx));
+    expect(tester.getCenter(ok).dx, lessThan(tester.getCenter(cancel).dx));
     final style = tester.widget<FilledButton>(cancel).style!;
     expect(style.foregroundColor!.resolve({}), Colors.white);
     expect(style.backgroundColor!.resolve({}), isNot(Colors.white));
