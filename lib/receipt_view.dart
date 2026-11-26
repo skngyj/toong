@@ -409,7 +409,7 @@ class _PrintReceiptPageState extends State<PrintReceiptPage>
     final done = tear.isCompleted;
     // 뜯긴 뒤: 아래로 툭 떨어졌다 살짝 튀어 올라 자리 잡는다.
     final t = Curves.easeOutBack.transform(tear.value);
-    final drop = torn ? 36 * t : 0.0;
+    final drop = torn ? 72 * t : 0.0;
     final tilt = torn ? -0.03 * sin(tear.value * pi) : 0.0;
     // 나오는 동안은 좌우로 아주 조금 떨린다.
     final shake = feed.isAnimating && lastStep.isOdd ? 0.8 : 0.0;
@@ -427,13 +427,15 @@ class _PrintReceiptPageState extends State<PrintReceiptPage>
       body: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: done ? null : skip,
-        child: Column(
+        child: Stack(
           children: [
-            const _Printer(),
-            Expanded(
+            // 출력기 몸통. 종이는 그 위에 겹쳐 그려 입구에서 나와 앞면을 덮으며 내려온다.
+            const Positioned(left: 0, right: 0, top: 0, child: _Printer()),
+            Positioned.fill(
+              top: _Printer.slotY,
               child: done
                   ? SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(50, 36, 50, 24),
+                      padding: const EdgeInsets.fromLTRB(50, 72, 50, 24),
                       child: Column(
                         children: [
                           paper,
@@ -474,11 +476,21 @@ class _PrintReceiptPageState extends State<PrintReceiptPage>
                       ),
                     ),
             ),
+            // 입구 틈. 종이 윗부분을 살짝 덮어 입구에서 나오는 것처럼 보이게 한다.
+            const Positioned(
+              left: _Printer.slotInset,
+              right: _Printer.slotInset,
+              top: _Printer.slotY - _Printer.slotHeight / 2,
+              child: _Slot(),
+            ),
             if (!done)
-              const Padding(
-                padding: EdgeInsets.only(bottom: 28),
+              const Positioned(
+                left: 0,
+                right: 0,
+                bottom: 28,
                 child: Text(
                   '영수증 출력 중… 누르면 건너뛰어요',
+                  textAlign: TextAlign.center,
                   style: TextStyle(color: toongSub, fontSize: 13),
                 ),
               ),
@@ -489,28 +501,58 @@ class _PrintReceiptPageState extends State<PrintReceiptPage>
   }
 }
 
-/// 영수증이 나오는 출력기 입구.
+/// 영수증 출력기 몸통. 입구 틈([slotY])은 앞면 위쪽에 있고 종이는 거기서 나온다.
 class _Printer extends StatelessWidget {
   const _Printer();
+
+  /// 화면 위에서 입구 틈 가운데까지의 거리.
+  static const double slotY = 52;
+  static const double slotHeight = 8;
+
+  /// 화면 양옆에서 입구 틈까지의 거리. 종이(양옆 50)보다 조금 넓다.
+  static const double slotInset = 40;
+
   @override
   Widget build(BuildContext context) => Container(
     margin: const EdgeInsets.fromLTRB(20, 8, 20, 0),
-    height: 56,
+    height: 104,
     decoration: const BoxDecoration(
       color: toongDark,
       borderRadius: BorderRadius.vertical(
-        top: Radius.circular(16),
-        bottom: Radius.circular(8),
+        top: Radius.circular(18),
+        bottom: Radius.circular(12),
       ),
     ),
-    alignment: Alignment.bottomCenter,
-    padding: const EdgeInsets.fromLTRB(26, 0, 26, 10),
+    alignment: Alignment.bottomRight,
+    padding: const EdgeInsets.fromLTRB(0, 0, 16, 12),
+    // 앞면 오른쪽 아래의 작은 전원 불빛.
     child: Container(
-      height: 6,
-      decoration: BoxDecoration(
-        color: Colors.black,
-        borderRadius: BorderRadius.circular(3),
+      width: 8,
+      height: 8,
+      decoration: const BoxDecoration(
+        color: Color(0xFF7BE07B),
+        shape: BoxShape.circle,
       ),
+    ),
+  );
+}
+
+/// 출력기 입구 틈.
+class _Slot extends StatelessWidget {
+  const _Slot();
+  @override
+  Widget build(BuildContext context) => Container(
+    height: _Printer.slotHeight,
+    decoration: BoxDecoration(
+      color: Colors.black,
+      borderRadius: BorderRadius.circular(4),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0x55000000),
+          blurRadius: 2,
+          offset: Offset(0, 1),
+        ),
+      ],
     ),
   );
 }
