@@ -1,7 +1,10 @@
 import 'dart:math';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:gal/gal.dart';
 
 import 'domain/models.dart';
 import 'domain/settlement.dart';
@@ -284,9 +287,15 @@ class ReceiptContent extends StatelessWidget {
           const Text('주고받을 돈이 없어요.', style: TextStyle(color: toongSub)),
         for (final t in result.transfers)
           ReceiptLine(
+            '${room.isPaid(t.from, t.to, t.amount) ? '✓ ' : ''}'
             '${room.memberName(t.from)} → ${room.memberName(t.to)}',
             _won(t.amount),
             bold: true,
+          ),
+        if (result.transfers.any((t) => room.isPaid(t.from, t.to, t.amount)))
+          const Text(
+            '✓ 송금 완료',
+            style: TextStyle(fontSize: 11.5, color: toongSub),
           ),
         const ReceiptDivider(),
         const Text('지출 내역', style: TextStyle(fontWeight: FontWeight.w700)),
@@ -328,6 +337,112 @@ class ReceiptTextContent extends StatelessWidget {
   );
 }
 
+/// PNG 이미지를 사진 앱에 저장한다. 테스트에서 바꿔 끼운다.
+Future<void> Function(Uint8List png, String name) saveImageToGallery =
+    _saveWithGal;
+
+Future<void> _saveWithGal(Uint8List png, String name) async {
+  if (!await Gal.hasPermission() && !await Gal.requestPermission()) {
+    throw StateError('사진 앱 접근을 허용해야 영수증 이미지를 저장할 수 있어요.');
+  }
+  try {
+    await Gal.putImageBytes(png, name: name);
+  } on GalException catch (error) {
+    throw StateError(switch (error.type) {
+      GalExceptionType.permissionDenied => '사진 앱 접근을 허용해야 영수증 이미지를 저장할 수 있어요.',
+      GalExceptionType.notEnoughSpace => '휴대폰 저장 공간이 부족해요.',
+      _ => '영수증 이미지를 저장하지 못했어요.',
+    });
+  }
+}
+
+/// 사진처럼 찍어 저장할 수 있는 영수증. 찍을 때 화면이 하얗게 번쩍인다.
+class CapturableReceipt extends StatefulWidget {
+  const CapturableReceipt({super.key, required this.child});
+  final Widget child;
+  @override
+  State<CapturableReceipt> createState() => CapturableReceiptState();
+}
+
+class CapturableReceiptState extends State<CapturableReceipt>
+    with SingleTickerProviderStateMixin {
+  final _boundary = GlobalKey();
+  late final AnimationController _flash = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 320),
+  )..addListener(() => setState(() {}));
+
+  @override
+  void dispose() {
+    _flash.dispose();
+    super.dispose();
+  }
+
+  /// 영수증(회색 여백 포함)을 3배 해상도 PNG로 찍는다.
+  Future<Uint8List> capture() async {
+    final boundary =
+        _boundary.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+    final image = await boundary.toImage(pixelRatio: 3);
+    final data = await image.toByteData(format: ui.ImageByteFormat.png);
+    image.dispose();
+    HapticFeedback.mediumImpact();
+    _flash.forward(from: 0);
+    return data!.buffer.asUint8List();
+  }
+
+  @override
+  Widget build(BuildContext context) => Stack(
+    children: [
+      RepaintBoundary(
+        key: _boundary,
+        child: ColoredBox(
+          color: toongSoft,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
+            child: widget.child,
+          ),
+        ),
+      ),
+      if (_flash.isAnimating)
+        Positioned.fill(
+          child: IgnorePointer(
+            child: ColoredBox(
+              color: Colors.white.withValues(alpha: 1 - _flash.value),
+            ),
+          ),
+        ),
+    ],
+  );
+}
+
+/// [receipt]를 찍어 사진 앱에 저장하고 결과를 알린다. 저장했으면 true.
+Future<bool> saveReceiptImage(
+  BuildContext context,
+  GlobalKey<CapturableReceiptState> receipt,
+  String name,
+) async {
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    final png = await receipt.currentState!.capture();
+    await saveImageToGallery(png, name);
+    messenger.showSnackBar(
+      const SnackBar(content: Text('영수증 이미지를 사진 앱에 저장했어요.')),
+    );
+    return true;
+  } catch (error) {
+    final message = error is StateError ? error.message : '영수증 이미지를 저장하지 못했어요.';
+    messenger.showSnackBar(SnackBar(content: Text(message)));
+    return false;
+  }
+}
+
+/// 사진 앱에 저장할 파일 이름. 예: 퉁_금요일모임_20261126
+String receiptFileName(String roomName, DateTime time) {
+  final t = time.toLocal();
+  final safe = roomName.replaceAll(RegExp(r'[^0-9A-Za-z가-힣]'), '');
+  return '퉁_${safe.isEmpty ? '정산' : safe}_${t.year}${_two(t.month)}${_two(t.day)}';
+}
+
 /// 정산 완료 직후 영수증이 출력기에서 나오는 화면.
 ///
 /// 종이가 "지지직" 하고 조금씩 끊기며 나온 뒤(짧은 진동), 다 나오면 "탁" 하고 뜯겨
@@ -355,6 +470,21 @@ class _PrintReceiptPageState extends State<PrintReceiptPage>
   );
   int lastStep = 0;
   bool torn = false;
+  final receipt = GlobalKey<CapturableReceiptState>();
+  bool saving = false;
+
+  Future<void> saveImage() async {
+    setState(() => saving = true);
+    await saveReceiptImage(
+      context,
+      receipt,
+      receiptFileName(
+        widget.room.name,
+        widget.room.completedAt ?? widget.room.lastActivityAt,
+      ),
+    );
+    if (mounted) setState(() => saving = false);
+  }
 
   @override
   void initState() {
@@ -435,17 +565,26 @@ class _PrintReceiptPageState extends State<PrintReceiptPage>
               top: _Printer.slotY,
               child: done
                   ? SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(50, 72, 50, 24),
+                      padding: const EdgeInsets.fromLTRB(32, 58, 32, 24),
                       child: Column(
                         children: [
-                          paper,
-                          const SizedBox(height: 20),
+                          CapturableReceipt(key: receipt, child: paper),
+                          const SizedBox(height: 14),
                           const Text(
                             '정산 기록과 내 부담액(가계부)을 이 기기에 저장했어요.',
                             textAlign: TextAlign.center,
                             style: TextStyle(color: toongSub, fontSize: 13),
                           ),
                           const SizedBox(height: 12),
+                          OutlinedButton.icon(
+                            onPressed: saving ? null : saveImage,
+                            style: OutlinedButton.styleFrom(
+                              minimumSize: const Size(double.infinity, 50),
+                            ),
+                            icon: const Icon(Icons.download_outlined),
+                            label: Text(saving ? '저장 중…' : '영수증 이미지 저장'),
+                          ),
+                          const SizedBox(height: 10),
                           FilledButton(
                             onPressed: () => Navigator.pop(context),
                             child: const Text('확인'),

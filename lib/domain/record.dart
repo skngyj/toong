@@ -67,9 +67,12 @@ String buildRecordText(Room room) {
     lines.add('- 주고받을 돈이 없습니다.');
   }
   for (final transfer in settlement.transfers) {
+    final paid = room.isPaid(transfer.from, transfer.to, transfer.amount)
+        ? ' (송금 완료)'
+        : '';
     lines.add(
       '- ${room.memberName(transfer.from)} → ${room.memberName(transfer.to)} '
-      '${_won(transfer.amount)}원',
+      '${_won(transfer.amount)}원$paid',
     );
   }
   return lines.join('\n');

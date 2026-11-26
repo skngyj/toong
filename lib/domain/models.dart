@@ -149,6 +149,40 @@ class Expense {
   );
 }
 
+/// 송금 완료 표시. 보내는 사람·받는 사람(또는 방장)이 정산 결과의 송금마다 표시한다.
+/// 금액까지 같아야 같은 송금으로 본다. 지출이 바뀌어 금액이 달라지면 다시 확인해야 한다.
+class PaidTransfer {
+  const PaidTransfer({
+    required this.from,
+    required this.to,
+    required this.amount,
+    required this.by,
+    required this.at,
+  });
+  final String from;
+  final String to;
+  final int amount;
+
+  /// 표시한 참여자 id.
+  final String by;
+  final DateTime at;
+
+  Map<String, dynamic> toJson() => {
+    'from': from,
+    'to': to,
+    'amount': amount,
+    'by': by,
+    'at': at.toUtc().toIso8601String(),
+  };
+  factory PaidTransfer.fromJson(Map<String, dynamic> json) => PaidTransfer(
+    from: json['from'] as String,
+    to: json['to'] as String,
+    amount: (json['amount'] as num).toInt(),
+    by: json['by'] as String,
+    at: DateTime.parse(json['at'] as String).toUtc(),
+  );
+}
+
 class Room {
   const Room({
     required this.id,
@@ -163,6 +197,7 @@ class Room {
     this.extendCount = 0,
     this.frozenAt,
     this.completedAt,
+    this.paidTransfers = const [],
   });
   final String id;
   final String code;
@@ -184,6 +219,21 @@ class Room {
 
   /// 정산을 완료한 시각. 완료하지 않았으면 null.
   final DateTime? completedAt;
+
+  /// 송금 완료 표시들. 서버가 관리한다(앱의 저장으로는 바뀌지 않는다).
+  final List<PaidTransfer> paidTransfers;
+
+  /// [from]이 [to]에게 보내는 송금의 완료 표시. 없으면 null.
+  PaidTransfer? paidMark(String from, String to) {
+    for (final mark in paidTransfers) {
+      if (mark.from == from && mark.to == to) return mark;
+    }
+    return null;
+  }
+
+  /// [from]이 [to]에게 [amount]원을 보낸 것으로 표시돼 있는지(금액까지 같아야 한다).
+  bool isPaid(String from, String to, int amount) =>
+      paidMark(from, to)?.amount == amount;
 
   bool get isFrozen => frozenAt != null;
   bool get isCompleted => completedAt != null;
@@ -241,6 +291,7 @@ class Room {
     DateTime? frozenAt,
     bool clearFrozen = false,
     DateTime? completedAt,
+    List<PaidTransfer>? paidTransfers,
   }) => Room(
     id: id,
     code: code,
@@ -254,6 +305,7 @@ class Room {
     extendCount: extendCount ?? this.extendCount,
     frozenAt: clearFrozen ? null : frozenAt ?? this.frozenAt,
     completedAt: completedAt ?? this.completedAt,
+    paidTransfers: paidTransfers ?? this.paidTransfers,
   );
 
   Map<String, dynamic> toJson() => {
@@ -269,6 +321,7 @@ class Room {
     'extend_count': extendCount,
     'frozen_at': frozenAt?.toUtc().toIso8601String(),
     'completed_at': completedAt?.toUtc().toIso8601String(),
+    'paid_transfers': paidTransfers.map((m) => m.toJson()).toList(),
   };
 
   /// [fallbackActivity]는 이 필드가 생기기 전에 저장된 방에 쓰인다.
@@ -299,6 +352,10 @@ class Room {
     extendCount: (json['extend_count'] as num?)?.toInt() ?? 0,
     frozenAt: _time(json['frozen_at']),
     completedAt: _time(json['completed_at']),
+    paidTransfers: [
+      for (final mark in json['paid_transfers'] as List? ?? const [])
+        PaidTransfer.fromJson(Map<String, dynamic>.from(mark as Map)),
+    ],
   );
   static DateTime? _time(Object? value) =>
       value is String ? DateTime.parse(value).toUtc() : null;

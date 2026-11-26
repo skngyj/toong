@@ -92,11 +92,22 @@ class _ToongAppState extends State<ToongApp> {
     title: '퉁',
     debugShowCheckedModeBanner: false,
     theme: toongTheme(),
+    // 화면 아래 시스템 내비게이션 바(제스처 바·버튼)에 내용이 가리지 않게 한다.
+    // Android 15부터는 앱이 화면 맨 아래까지 그려지므로 모든 화면에 아래 여백을 둔다.
+    builder: (context, child) => ColoredBox(
+      color: toongCanvas,
+      child: SafeArea(
+        top: false,
+        left: false,
+        right: false,
+        child: child ?? const SizedBox.shrink(),
+      ),
+    ),
     home: HomePage(store: store),
   );
 }
 
-/// 확인·취소를 묻는 창. 두 버튼은 같은 크기로 좌우에 놓고, 취소는 빨간 버튼이다.
+/// 확인·취소를 묻는 창. 두 버튼은 같은 크기로 확인을 왼쪽, 취소를 오른쪽에 놓고, 취소는 빨간 버튼이다.
 Future<bool> askConfirm(
   BuildContext context, {
   required Widget title,
@@ -112,7 +123,7 @@ Future<bool> askConfirm(
     ) ??
     false;
 
-/// 창 아래의 "취소 / 확인" 버튼 한 줄. 취소는 [cancelValue](기본 false)를, 확인은
+/// 창 아래의 "확인 / 취소" 버튼 한 줄. 취소는 [cancelValue](기본 false)를, 확인은
 /// [confirmValue]가 있으면 그 값을, 없으면 true를 돌려주며 닫는다.
 /// [canConfirm]이 false면 확인을 누를 수 없다.
 Widget dialogButtons(
@@ -124,21 +135,21 @@ Widget dialogButtons(
   children: [
     Expanded(
       child: FilledButton(
+        onPressed: canConfirm
+            ? () => Navigator.pop(context, confirmValue?.call() ?? true)
+            : null,
+        child: const Text('확인'),
+      ),
+    ),
+    const SizedBox(width: 12),
+    Expanded(
+      child: FilledButton(
         style: FilledButton.styleFrom(
           backgroundColor: _danger,
           foregroundColor: Colors.white,
         ),
         onPressed: () => Navigator.pop(context, cancelValue),
         child: const Text('취소'),
-      ),
-    ),
-    const SizedBox(width: 12),
-    Expanded(
-      child: FilledButton(
-        onPressed: canConfirm
-            ? () => Navigator.pop(context, confirmValue?.call() ?? true)
-            : null,
-        child: const Text('확인'),
       ),
     ),
   ],
@@ -633,11 +644,21 @@ String formatDay(DateTime time) {
 }
 
 /// 기기에 저장된 완료 정산 기록. 서버 방이 삭제된 뒤에도 볼 수 있다.
-class RecordPage extends StatelessWidget {
+/// 영수증 모양으로 보여주고, 영수증을 그대로 찍어 사진 앱에 저장할 수 있다.
+class RecordPage extends StatefulWidget {
   const RecordPage({super.key, required this.record});
   final SettlementRecord record;
+  @override
+  State<RecordPage> createState() => _RecordPageState();
+}
 
-  Future<void> remove(BuildContext context) async {
+class _RecordPageState extends State<RecordPage> {
+  final receipt = GlobalKey<CapturableReceiptState>();
+  bool saving = false;
+
+  SettlementRecord get record => widget.record;
+
+  Future<void> remove() async {
     final accepted = await askConfirm(
       context,
       title: const Text('기록을 지울까요?'),
@@ -645,7 +666,17 @@ class RecordPage extends StatelessWidget {
     );
     if (accepted != true) return;
     await RecordStore().remove(record.roomId);
-    if (context.mounted) Navigator.pop(context);
+    if (mounted) Navigator.pop(context);
+  }
+
+  Future<void> saveImage() async {
+    setState(() => saving = true);
+    await saveReceiptImage(
+      context,
+      receipt,
+      receiptFileName(record.name, record.completedAt),
+    );
+    if (mounted) setState(() => saving = false);
   }
 
   @override
@@ -658,30 +689,47 @@ class RecordPage extends StatelessWidget {
         IconButton(
           icon: const Icon(Icons.delete_outline),
           tooltip: '기록 지우기',
-          onPressed: () => remove(context),
+          onPressed: remove,
         ),
       ],
     ),
     body: ListView(
-      padding: const EdgeInsets.fromLTRB(24, 12, 24, 28),
+      padding: const EdgeInsets.fromLTRB(6, 0, 6, 28),
       children: [
         // 완료된 정산은 영수증 모양으로 보여준다. 예전 기록은 저장된 글자로 그린다.
-        ReceiptPaper(
-          child: record.room != null
-              ? ReceiptContent(room: record.room!)
-              : ReceiptTextContent(text: record.text),
+        CapturableReceipt(
+          key: receipt,
+          child: ReceiptPaper(
+            child: record.room != null
+                ? ReceiptContent(room: record.room!)
+                : ReceiptTextContent(text: record.text),
+          ),
         ),
-        const SizedBox(height: 20),
-        FilledButton.icon(
-          onPressed: () async {
-            await Clipboard.setData(ClipboardData(text: record.text));
-            if (context.mounted) {
-              ScaffoldMessenger.of(context)
-                  .showSnackBar(const SnackBar(content: Text('정산 기록을 복사했어요.')));
-            }
-          },
-          icon: const Icon(Icons.copy),
-          label: const Text('기록 복사'),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 18),
+          child: Column(
+            children: [
+              const SizedBox(height: 8),
+              FilledButton.icon(
+                onPressed: saving ? null : saveImage,
+                icon: const Icon(Icons.download_outlined),
+                label: Text(saving ? '저장 중…' : '영수증 이미지 저장'),
+              ),
+              const SizedBox(height: 4),
+              TextButton.icon(
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: record.text));
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('정산 기록을 글자로 복사했어요.')),
+                    );
+                  }
+                },
+                icon: const Icon(Icons.copy, size: 18),
+                label: const Text('글자로 복사'),
+              ),
+            ],
+          ),
         ),
       ],
     ),
@@ -1086,7 +1134,7 @@ class _RoomPageState extends State<RoomPage> {
                                   room: r,
                                   canEdit: owner,
                                 )
-                              : SettlementPage(room: r),
+                              : SettlementPage(store: widget.store, room: r),
                         ),
                   child: const Text('정산 결과 보기'),
                 ),
@@ -2002,7 +2050,10 @@ class _RemainderPageState extends State<RemainderPage> {
             FilledButton(
               onPressed: () => Navigator.pushReplacement(
                 context,
-                MaterialPageRoute(builder: (_) => SettlementPage(room: room)),
+                MaterialPageRoute(
+                  builder: (_) =>
+                      SettlementPage(store: widget.store, room: room),
+                ),
               ),
               child: const Text('최종 정산 보기'),
             ),
@@ -2020,9 +2071,72 @@ class _RemainderPageState extends State<RemainderPage> {
   }
 }
 
-class SettlementPage extends StatelessWidget {
-  const SettlementPage({super.key, required this.room});
+/// 최종 정산 결과. 누가 누구에게 얼마를 보내면 되는지 보여주고, 송금마다
+/// 보내는 사람·받는 사람(또는 방장)이 "송금 완료"를 표시하거나 풀 수 있다.
+class SettlementPage extends StatefulWidget {
+  const SettlementPage({super.key, required this.store, required this.room});
+  final RoomStore store;
   final Room room;
+  @override
+  State<SettlementPage> createState() => _SettlementPageState();
+}
+
+class _SettlementPageState extends State<SettlementPage> {
+  late Room room = widget.room;
+  String? actor;
+  bool busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.store.actorId().then((id) {
+      if (mounted) setState(() => actor = id);
+    });
+    refresh(silent: true);
+  }
+
+  /// 다른 사람이 표시한 송금 완료를 불러온다.
+  Future<void> refresh({bool silent = false}) async {
+    try {
+      final fresh = await widget.store.getRoom(room.id);
+      if (mounted) setState(() => room = fresh);
+    } catch (error) {
+      if (!silent && mounted) await showFailure(context, error);
+    }
+  }
+
+  /// 이 송금에 표시할 수 있는지: 보내는 사람, 받는 사람, 방장.
+  bool canMark(Transfer t) {
+    final me = actor == null ? null : room.actorMember(actor!);
+    if (me == null) return false;
+    return me.id == t.from || me.id == t.to || room.owns(actor!);
+  }
+
+  Future<void> toggle(Transfer t, bool paid) async {
+    final who =
+        '${room.memberName(t.from)} → ${room.memberName(t.to)} ${money(t.amount)}';
+    final accepted = await askConfirm(
+      context,
+      title: Text(paid ? '송금 완료 표시를 풀까요?' : '이 금액이 정산되었나요?'),
+      content: Text(
+        paid
+            ? '$who을 다시 보내야 할 돈으로 표시해요.'
+            : '$who을 송금 완료로 표시해요. 참여자 모두에게 똑같이 보여요.',
+      ),
+    );
+    if (!accepted || !mounted) return;
+    setState(() => busy = true);
+    try {
+      final updated = await widget.store.markTransfer(room, t, paid: !paid);
+      // 완료된 방이면 기기에 저장된 정산 기록도 새 표시로 바꾼다.
+      await RecordStore().replace(updated);
+      if (mounted) setState(() => room = updated);
+    } catch (error) {
+      if (mounted) await showFailure(context, error);
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2033,85 +2147,191 @@ class SettlementPage extends StatelessWidget {
       );
     }
     final result = calculateSettlement(room);
+    final done = result.transfers
+        .where((t) => room.isPaid(t.from, t.to, t.amount))
+        .length;
     return Scaffold(
-      appBar: AppBar(title: const Text('정산 결과')),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 30),
-        children: [
-          const Text(
-            '이렇게 보내면\n정산 끝.',
-            style: TextStyle(
-              fontSize: 30,
-              fontWeight: FontWeight.bold,
-              height: 1.3,
-            ),
+      appBar: AppBar(
+        title: const Text('정산 결과'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: '새로고침',
+            onPressed: refresh,
           ),
-          const SizedBox(height: 24),
-          if (result.transfers.isEmpty)
-            const Card(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: Text('주고받을 돈이 없어요. 이미 셈셈!'),
+        ],
+      ),
+      body: RefreshIndicator(
+        onRefresh: refresh,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 30),
+          children: [
+            const Text(
+              '이렇게 보내면\n정산 끝.',
+              style: TextStyle(
+                fontSize: 30,
+                fontWeight: FontWeight.bold,
+                height: 1.3,
               ),
             ),
-          for (final transfer in result.transfers)
-            Card(
-              color: _soft,
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '${room.memberName(transfer.from)}  →  ${room.memberName(transfer.to)}',
-                      style: const TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.bold,
+            if (result.transfers.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text(
+                done == result.transfers.length
+                    ? '모든 송금이 끝났어요.'
+                    : '송금 ${result.transfers.length}건 중 $done건 완료',
+                style: const TextStyle(
+                  color: toongSub,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+            const SizedBox(height: 20),
+            if (result.transfers.isEmpty)
+              const Card(
+                child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text('주고받을 돈이 없어요. 이미 셈셈!'),
+                ),
+              ),
+            for (final transfer in result.transfers)
+              _TransferCard(
+                room: room,
+                transfer: transfer,
+                canMark: canMark(transfer) && !busy,
+                onToggle: (paid) => toggle(transfer, paid),
+              ),
+            const SizedBox(height: 10),
+            const Text(
+              '송금은 사용 중인 은행 앱에서 진행해주세요. 보낸 뒤 체크하면 참여자 모두에게 보여요. '
+              '보내는 사람, 받는 사람, 방장이 체크할 수 있어요.',
+              style: TextStyle(color: toongSub),
+            ),
+            const SizedBox(height: 24),
+            ExpansionTile(
+              title: const Text('개인별 계산 내역'),
+              children: room.members
+                  .map(
+                    (m) => ListTile(
+                      title: Text(m.name),
+                      subtitle: Text(
+                        '결제 ${money(result.paid[m.id]!)} · 부담 ${money(result.owed[m.id]!)}',
+                      ),
+                      trailing: Text(
+                        '${result.balance[m.id]! >= 0 ? '+' : ''}${money(result.balance[m.id]!)}',
                       ),
                     ),
-                    const SizedBox(height: 8),
+                  )
+                  .toList(),
+            ),
+            if (room.members.any((m) => m.actorId == null))
+              const Padding(
+                padding: EdgeInsets.only(top: 16),
+                child: Text(
+                  '미연결 과거 참여자가 포함돼 있어요. 송금 대상과 금액을 확인해주세요.',
+                  style: TextStyle(color: toongSub),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 송금 한 건. 오른쪽 체크로 송금 완료를 표시한다.
+class _TransferCard extends StatelessWidget {
+  const _TransferCard({
+    required this.room,
+    required this.transfer,
+    required this.canMark,
+    required this.onToggle,
+  });
+  final Room room;
+  final Transfer transfer;
+  final bool canMark;
+
+  /// 지금 완료 상태를 넘긴다(true면 풀기, false면 표시하기).
+  final ValueChanged<bool> onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = transfer;
+    final mark = room.paidMark(t.from, t.to);
+    final paid = mark != null && mark.amount == t.amount;
+    // 지출이 바뀌어 금액이 달라진 표시.
+    final stale = mark != null && !paid;
+    final name = '${room.memberName(t.from)} → ${room.memberName(t.to)}';
+    return Card(
+      color: paid ? toongCanvas : _soft,
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 12, 16),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name,
+                    style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.bold,
+                      color: paid ? toongSub : _ink,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    money(t.amount),
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                      color: paid ? toongSub : _ink,
+                      decoration: paid ? TextDecoration.lineThrough : null,
+                    ),
+                  ),
+                  if (paid)
                     Text(
-                      money(transfer.amount),
-                      style: const TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
+                      '송금 완료 · ${room.memberName(mark.by)} 확인',
+                      style: const TextStyle(fontSize: 13, color: toongSub),
+                    ),
+                  if (stale)
+                    Text(
+                      '금액이 바뀌었어요. 전에 ${money(mark.amount)} 송금 완료로 표시됐어요.',
+                      style: const TextStyle(fontSize: 13, color: toongDanger),
+                    ),
+                ],
+              ),
+            ),
+            Tooltip(
+              message: paid ? '$name 송금 완료 풀기' : '$name 송금 완료 표시',
+              child: InkWell(
+                customBorder: const CircleBorder(),
+                onTap: canMark ? () => onToggle(paid) : null,
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: paid ? _ink : Colors.transparent,
+                      border: Border.all(
+                        color: canMark || paid ? _ink : toongLine,
+                        width: 2,
                       ),
                     ),
-                  ],
+                    child: paid
+                        ? const Icon(Icons.check, color: Colors.white, size: 24)
+                        : null,
+                  ),
                 ),
               ),
             ),
-          const SizedBox(height: 10),
-          const Text(
-            '송금은 사용 중인 은행 앱에서 진행해주세요.',
-            style: TextStyle(color: toongSub),
-          ),
-          const SizedBox(height: 24),
-          ExpansionTile(
-            title: const Text('개인별 계산 내역'),
-            children: room.members
-                .map(
-                  (m) => ListTile(
-                    title: Text(m.name),
-                    subtitle: Text(
-                      '결제 ${money(result.paid[m.id]!)} · 부담 ${money(result.owed[m.id]!)}',
-                    ),
-                    trailing: Text(
-                      '${result.balance[m.id]! >= 0 ? '+' : ''}${money(result.balance[m.id]!)}',
-                    ),
-                  ),
-                )
-                .toList(),
-          ),
-          if (room.members.any((m) => m.actorId == null))
-            const Padding(
-              padding: EdgeInsets.only(top: 16),
-              child: Text(
-                '미연결 과거 참여자가 포함돼 있어요. 송금 대상과 금액을 확인해주세요.',
-                style: TextStyle(color: toongSub),
-              ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }

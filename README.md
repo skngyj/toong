@@ -2,7 +2,7 @@
 
 친구들과 쓴 비용을 각자의 메뉴에 맞게 나누고, 여러 결제자의 금액을 상계하는 Flutter 앱입니다. 1~3주차 목표(수동 입력 정산, 방 코드·링크 입장, 방 보관 규칙, 영수증 인식, 잔돈 추첨, 개인 가계부와 월 예산 알림)를 구현했습니다. 주차별 목표는 [기획서](docs/product-plan.md) 14장에 있습니다.
 
-현재 포함된 흐름: 방 생성·코드 입장, 방 링크 입장, 참여 중인 방 목록, 메뉴와 비용 수동 입력, 항목별 부담자 선택, 잔돈 부담자 직접 지정, 최종 송금 안내, 참여자의 정산 복제, 방 자동 삭제·연장·얼리기, 정산 완료와 기기 저장 기록, 방장의 방 삭제와 인원 추가·빼기, 영수증 사진 인식(Gemini), 잔돈 추첨(가챠), 개인 가계부와 월 예산 알림. 앱 내 송금 기능은 없습니다.
+현재 포함된 흐름: 방 생성·코드 입장, 방 링크 입장, 참여 중인 방 목록, 메뉴와 비용 수동 입력, 항목별 부담자 선택, 잔돈 부담자 직접 지정, 최종 송금 안내, 참여자의 정산 복제, 방 자동 삭제·연장·얼리기, 정산 완료와 기기 저장 기록, 방장의 방 삭제와 인원 추가·빼기, 송금 완료 체크, 정산 영수증 이미지 저장, 영수증 사진 인식(Gemini), 잔돈 추첨(가챠), 개인 가계부와 월 예산 알림. 앱 내 송금 기능은 없습니다.
 
 ## 방 보관 규칙
 
@@ -54,7 +54,7 @@ Actions 탭의 **Android APK → Run workflow**로 직접 빌드할 수도 있�
 ## 친구 기기와 연결하기
 
 1. Supabase 프로젝트를 만들고 **Anonymous Sign-Ins**를 활성화합니다.
-2. SQL Editor에서 [`supabase/migrations/202610020001_first_version.sql`](supabase/migrations/202610020001_first_version.sql), [`supabase/migrations/202611080001_room_expiry.sql`](supabase/migrations/202611080001_room_expiry.sql), [`supabase/migrations/202611110001_room_lifecycle.sql`](supabase/migrations/202611110001_room_lifecycle.sql), [`supabase/migrations/202611150001_receipt_scan.sql`](supabase/migrations/202611150001_receipt_scan.sql), [`supabase/migrations/202611190001_delete_room.sql`](supabase/migrations/202611190001_delete_room.sql), [`supabase/migrations/202611250001_owner_members.sql`](supabase/migrations/202611250001_owner_members.sql)을 순서대로 실행합니다. 두 번째 파일은 `pg_cron` 확장을 켜고 기한이 지난 방을 1시간마다 지우는 작업을 등록합니다. 세 번째 파일은 방 연장·얼리기·정산 완료 함수와, 방이 없는 익명 사용자를 하루 한 번 지우는 작업을 추가합니다. 네 번째 파일은 영수증 인식의 사용자별 하루 호출 횟수(20회)를 셉니다. 다섯 번째 파일은 방장이 방을 바로 삭제하는 함수를, 여섯 번째 파일은 방장이 정산 인원을 추가하거나 빼는 함수를 추가합니다. 확장 생성 권한 오류가 나면 Dashboard > Database > Extensions에서 `pg_cron`을 먼저 켠 뒤 다시 실행합니다.
+2. SQL Editor에서 [`supabase/migrations/202610020001_first_version.sql`](supabase/migrations/202610020001_first_version.sql), [`supabase/migrations/202611080001_room_expiry.sql`](supabase/migrations/202611080001_room_expiry.sql), [`supabase/migrations/202611110001_room_lifecycle.sql`](supabase/migrations/202611110001_room_lifecycle.sql), [`supabase/migrations/202611150001_receipt_scan.sql`](supabase/migrations/202611150001_receipt_scan.sql), [`supabase/migrations/202611190001_delete_room.sql`](supabase/migrations/202611190001_delete_room.sql), [`supabase/migrations/202611250001_owner_members.sql`](supabase/migrations/202611250001_owner_members.sql), [`supabase/migrations/202611260001_paid_transfers.sql`](supabase/migrations/202611260001_paid_transfers.sql)을 순서대로 실행합니다. 두 번째 파일은 `pg_cron` 확장을 켜고 기한이 지난 방을 1시간마다 지우는 작업을 등록합니다. 세 번째 파일은 방 연장·얼리기·정산 완료 함수와, 방이 없는 익명 사용자를 하루 한 번 지우는 작업을 추가합니다. 네 번째 파일은 영수증 인식의 사용자별 하루 호출 횟수(20회)를 셉니다. 다섯 번째 파일은 방장이 방을 바로 삭제하는 함수를, 여섯 번째 파일은 방장이 정산 인원을 추가하거나 빼는 함수를, 일곱 번째 파일은 송금 완료 표시 함수를 추가합니다. 확장 생성 권한 오류가 나면 Dashboard > Database > Extensions에서 `pg_cron`을 먼저 켠 뒤 다시 실행합니다.
 3. 프로젝트 URL과 **publishable key**를 아래처럼 빌드 인자로 넘깁니다.
 
 ```powershell

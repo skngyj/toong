@@ -32,6 +32,19 @@ class RecordStore {
     ]);
   }
 
+  /// 이미 저장한 기록이 있으면 [room]의 최신 내용(예: 송금 완료 표시)으로 바꾼다.
+  Future<void> replace(Room room) async {
+    if (!room.isCompleted) return;
+    final prefs = await _prefs;
+    final raw = prefs.getStringList(_key) ?? [];
+    final index = raw.indexWhere(
+      (s) => SettlementRecord.decode(s).roomId == room.id,
+    );
+    if (index < 0) return;
+    raw[index] = SettlementRecord.fromRoom(room).encode();
+    await prefs.setStringList(_key, raw);
+  }
+
   Future<void> remove(String roomId) async {
     final prefs = await _prefs;
     final raw = prefs.getStringList(_key) ?? [];
