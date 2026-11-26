@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
 import 'data/ledger_store.dart';
 import 'data/record_store.dart';
 import 'data/room_store.dart';
+import 'domain/draw.dart';
 import 'domain/models.dart';
 import 'domain/receipt.dart';
 import 'domain/record.dart';
@@ -1552,6 +1553,7 @@ class _ExpensePageState extends State<ExpensePage> {
           amount: amount,
           memberIds: selected,
           remainderMemberId: keepRemainder ? unchanged.remainderMemberId : null,
+          remainderOdds: keepRemainder ? unchanged.remainderOdds : null,
         ),
       );
     }
@@ -1823,6 +1825,19 @@ Random drawRandom = Random.secure();
 
 /// 잔돈 부담자를 뽑는 가챠(룰렛) 창. 후보를 고르고 돌리면 이름이 빠르게 돌다가
 /// 한 명에서 멈춘다. 확인을 누르면 뽑힌 참여자의 id를 돌려준다.
+/// 잔돈 추첨 결과. 확률을 직접 정했으면 [odds]에 후보별 비율이 있다.
+typedef DrawResult = ({String memberId, Map<String, int>? odds});
+
+/// 돌림판 칸 색. 흑백 테마에 맞춘 검정·회색 계열을 번갈아 쓴다.
+const _wheelColors = [
+  Color(0xFF111111),
+  Color(0xFF8A8A86),
+  Color(0xFF3A3A3A),
+  Color(0xFFBDBDB8),
+  Color(0xFF5E5E5B),
+  Color(0xFFDADAD5),
+];
+
 class DrawDialog extends StatefulWidget {
   const DrawDialog({super.key, required this.room, required this.item});
   final Room room;
@@ -1834,17 +1849,32 @@ class DrawDialog extends StatefulWidget {
 class _DrawDialogState extends State<DrawDialog>
     with SingleTickerProviderStateMixin {
   late final Set<String> candidates = widget.item.memberIds.toSet();
+
+  /// 후보별 확률 비율. [custom]이 꺼져 있으면 모두 1로 본다.
+  late final Map<String, int> weights = {
+    for (final id in widget.item.memberIds) id: 1,
+  };
+  bool custom = false;
+
   late final AnimationController spin =
       AnimationController(
           vsync: this,
-          duration: const Duration(milliseconds: 2400),
+          duration: const Duration(milliseconds: 3200),
         )
         ..addListener(() => setState(() {}))
-        ..addStatusListener((_) => setState(() {}));
+        ..addStatusListener((status) {
+          if (status == AnimationStatus.completed) {
+            HapticFeedback.heavyImpact();
+          }
+          setState(() {});
+        });
 
-  /// 이번 추첨에 쓴 후보(순서 고정)와 뽑힌 사람의 위치.
+  /// 이번 추첨에 쓴 후보(순서 고정), 비율, 뽑힌 사람의 위치, 돌림판이 멈출 회전량(바퀴 수).
   List<String> pool = [];
+  List<int> poolWeights = [];
   int? winner;
+  double turns = 0;
+  int lastSlice = -1;
 
   @override
   void dispose() {
@@ -1855,25 +1885,59 @@ class _DrawDialogState extends State<DrawDialog>
   bool get spinning => spin.isAnimating;
   bool get done => winner != null && spin.isCompleted;
 
-  /// 지금 룰렛 창에 보이는 참여자 이름. 처음에는 빠르게 돌다 점점 느려져 [winner]에서 멈춘다.
-  String? get shown {
-    if (winner == null || pool.isEmpty) return null;
-    final steps = pool.length * 5 + winner!;
-    final t = Curves.easeOutCubic.transform(spin.value);
-    return widget.room.memberName(pool[(t * steps).floor() % pool.length]);
+  /// 지금 화면에 그릴 후보와 비율. 돌린 뒤에는 그때의 후보를 그대로 보여준다.
+  List<String> get slices => winner != null
+      ? pool
+      : widget.item.memberIds.where(candidates.contains).toList();
+  List<int> get sliceWeights => winner != null
+      ? poolWeights
+      : [for (final id in slices) custom ? weights[id]! : 1];
+
+  /// 지금 돌림판이 돈 양(바퀴 수). 빠르게 돌다 점점 느려진다.
+  double get rotation => Curves.easeOutQuart.transform(spin.value) * turns;
+
+  /// 위쪽 화살표가 가리키는 칸의 위치.
+  int? get pointed {
+    final ws = sliceWeights;
+    if (ws.isEmpty) return null;
+    final total = ws.fold(0, (s, w) => s + w);
+    // 판이 시계 방향으로 r바퀴 돌면 화살표 아래에는 원래 (1 - r) 위치가 온다.
+    var at = (1 - rotation % 1) % 1 * total;
+    for (var i = 0; i < ws.length; i++) {
+      if (at < ws[i]) return i;
+      at -= ws[i];
+    }
+    return ws.length - 1;
   }
 
   void roll() {
     pool = widget.item.memberIds.where(candidates.contains).toList();
-    winner = drawRandom.nextInt(pool.length);
+    poolWeights = [for (final id in pool) custom ? weights[id]! : 1];
+    winner = pickWeighted(poolWeights, drawRandom);
+    // 뽑힌 칸 안의 한 지점(가장자리는 피함)이 화살표에 오도록 멈출 각도를 정한다.
+    final total = poolWeights.fold(0, (s, w) => s + w);
+    final start = poolWeights.take(winner!).fold(0, (s, w) => s + w);
+    final inside = 0.2 + drawRandom.nextDouble() * 0.6;
+    final target = (start + poolWeights[winner!] * inside) / total;
+    turns = 6 + (1 - target);
+    lastSlice = -1;
     spin.forward(from: 0);
   }
+
+  void reset() => winner = null;
 
   @override
   Widget build(BuildContext context) {
     final members = widget.item.memberIds;
     final all = candidates.length == members.length;
-    final name = shown;
+    final now = pointed;
+    if (spinning && now != null && now != lastSlice) {
+      lastSlice = now;
+      HapticFeedback.selectionClick();
+    }
+    final name = now == null ? null : widget.room.memberName(slices[now]);
+    final ids = slices;
+    final percents = weightPercents(sliceWeights);
     return AlertDialog(
       title: const Text('잔돈 추첨'),
       content: SingleChildScrollView(
@@ -1895,7 +1959,7 @@ class _DrawDialogState extends State<DrawDialog>
                   onSelected: spinning
                       ? null
                       : (_) => setState(() {
-                          winner = null;
+                          reset();
                           if (all) {
                             candidates.clear();
                           } else {
@@ -1910,27 +1974,88 @@ class _DrawDialogState extends State<DrawDialog>
                     onSelected: spinning
                         ? null
                         : (on) => setState(() {
-                            winner = null;
+                            reset();
                             on ? candidates.add(id) : candidates.remove(id);
                           }),
                   ),
               ],
             ),
-            const SizedBox(height: 16),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('확률 직접 정하기'),
+              subtitle: const Text(
+                '정한 확률은 결과와 함께 모두에게 보여요.',
+                style: TextStyle(fontSize: 12),
+              ),
+              value: custom,
+              onChanged: spinning
+                  ? null
+                  : (on) => setState(() {
+                      reset();
+                      custom = on;
+                    }),
+            ),
+            if (custom) ...[
+              for (final (i, id) in ids.indexed)
+                _WeightRow(
+                  color: _wheelColors[i % _wheelColors.length],
+                  name: widget.room.memberName(id),
+                  weight: weights[id]!,
+                  percent: percents[i],
+                  onChanged: spinning
+                      ? null
+                      : (w) => setState(() {
+                          reset();
+                          weights[id] = w;
+                        }),
+                ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: spinning
+                      ? null
+                      : () => setState(() {
+                          reset();
+                          weights.updateAll((_, _) => 1);
+                        }),
+                  child: const Text('모두 같게'),
+                ),
+              ),
+            ],
+            const SizedBox(height: 8),
+            Center(
+              child: SizedBox(
+                width: 220,
+                height: 236,
+                child: CustomPaint(
+                  key: const Key('draw-wheel'),
+                  painter: _WheelPainter(
+                    textStyle:
+                        Theme.of(context).textTheme.bodyMedium ??
+                        const TextStyle(),
+                    names: [for (final id in ids) widget.room.memberName(id)],
+                    weights: sliceWeights,
+                    rotation: rotation,
+                    highlight: done ? winner : null,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
             Container(
-              height: 88,
+              height: 64,
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: done ? _ink : _soft,
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(18),
               ),
               child: Text(
-                name ?? '?',
+                winner == null ? '?' : name ?? '?',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 key: const Key('draw-slot'),
                 style: TextStyle(
-                  fontSize: 30,
+                  fontSize: 26,
                   fontWeight: FontWeight.w800,
                   color: done ? Colors.white : _ink,
                 ),
@@ -1942,6 +2067,8 @@ class _DrawDialogState extends State<DrawDialog>
                   ? '$name 님이 잔돈 ${money(widget.item.remainder)}을 내요!'
                   : candidates.isEmpty
                   ? '추첨할 사람을 한 명 이상 골라주세요.'
+                  : custom
+                  ? '후보 ${candidates.length}명 중 정한 확률대로 한 명을 뽑아요.'
                   : '후보 ${candidates.length}명 중 한 명을 뽑아요.',
               textAlign: TextAlign.center,
             ),
@@ -1958,11 +2085,219 @@ class _DrawDialogState extends State<DrawDialog>
         dialogButtons(
           context,
           canConfirm: done,
-          confirmValue: () => pool[winner!],
+          confirmValue: () => (
+            memberId: pool[winner!],
+            odds: custom && poolWeights.toSet().length > 1
+                ? {for (final (i, id) in pool.indexed) id: poolWeights[i]}
+                : null,
+          ),
         ),
       ],
     );
   }
+}
+
+/// 후보 한 명의 확률 비율을 −/+로 정하는 줄.
+class _WeightRow extends StatelessWidget {
+  const _WeightRow({
+    required this.color,
+    required this.name,
+    required this.weight,
+    required this.percent,
+    required this.onChanged,
+  });
+  final Color color;
+  final String name;
+  final int weight;
+  final int percent;
+  final ValueChanged<int>? onChanged;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      Container(
+        width: 12,
+        height: 12,
+        decoration: BoxDecoration(
+          color: color,
+          shape: BoxShape.circle,
+          border: Border.all(color: toongLine),
+        ),
+      ),
+      const SizedBox(width: 8),
+      Expanded(child: Text(name, overflow: TextOverflow.ellipsis)),
+      IconButton(
+        visualDensity: VisualDensity.compact,
+        tooltip: '$name 확률 낮추기',
+        onPressed: onChanged == null || weight <= drawWeightMin
+            ? null
+            : () => onChanged!(weight - 1),
+        icon: const Icon(Icons.remove_circle_outline, size: 20),
+      ),
+      SizedBox(
+        width: 22,
+        child: Text(
+          '$weight',
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+      ),
+      IconButton(
+        visualDensity: VisualDensity.compact,
+        tooltip: '$name 확률 높이기',
+        onPressed: onChanged == null || weight >= drawWeightMax
+            ? null
+            : () => onChanged!(weight + 1),
+        icon: const Icon(Icons.add_circle_outline, size: 20),
+      ),
+      SizedBox(
+        width: 42,
+        child: Text(
+          '$percent%',
+          textAlign: TextAlign.right,
+          style: const TextStyle(color: toongSub),
+        ),
+      ),
+    ],
+  );
+}
+
+/// 칸 크기가 확률과 같은 돌림판. 위쪽 삼각형이 가리키는 칸이 뽑힌다.
+class _WheelPainter extends CustomPainter {
+  _WheelPainter({
+    required this.textStyle,
+    required this.names,
+    required this.weights,
+    required this.rotation,
+    required this.highlight,
+  });
+
+  /// 앱 글꼴을 그대로 쓰기 위한 기본 글자 모양.
+  final TextStyle textStyle;
+  final List<String> names;
+  final List<int> weights;
+
+  /// 돈 양(바퀴 수). 시계 방향.
+  final double rotation;
+  final int? highlight;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final radius = min(size.width, size.height - 16) / 2;
+    final center = Offset(size.width / 2, 16 + radius);
+    final rect = Rect.fromCircle(center: center, radius: radius);
+    if (names.isEmpty) {
+      canvas.drawCircle(center, radius, Paint()..color = _soft);
+    } else {
+      final total = weights.fold(0, (s, w) => s + w);
+      var start = -pi / 2 + rotation * 2 * pi;
+      for (var i = 0; i < names.length; i++) {
+        final sweep = weights[i] / total * 2 * pi;
+        final color = _wheelColors[i % _wheelColors.length];
+        final dim = highlight != null && highlight != i;
+        canvas.drawArc(
+          rect,
+          start,
+          sweep,
+          true,
+          Paint()..color = dim ? Color.lerp(color, Colors.white, 0.7)! : color,
+        );
+        if (names.length > 1) {
+          canvas.drawLine(
+            center,
+            center + Offset(cos(start), sin(start)) * radius,
+            Paint()
+              ..color = Colors.white
+              ..strokeWidth = 2,
+          );
+        }
+        // 이름은 칸 가운데, 바깥쪽 2/3 지점에 칸 방향으로 쓴다.
+        final mid = start + sweep / 2;
+        final dark = color.computeLuminance() < 0.4;
+        final label = TextPainter(
+          text: TextSpan(
+            text: names[i],
+            style: textStyle.copyWith(
+              fontSize: sweep < 0.5 ? 11 : 14,
+              fontWeight: FontWeight.w700,
+              color: dim
+                  ? toongSub
+                  : dark
+                  ? Colors.white
+                  : _ink,
+            ),
+          ),
+          maxLines: 1,
+          ellipsis: '…',
+          textDirection: TextDirection.ltr,
+        )..layout(maxWidth: radius * 0.62);
+        canvas.save();
+        canvas.translate(center.dx, center.dy);
+        canvas.rotate(mid);
+        canvas.translate(radius * 0.62, 0);
+        // 왼쪽 절반은 글자가 뒤집히지 않게 돌린다.
+        final flip = cos(mid) < 0;
+        if (flip) canvas.rotate(pi);
+        label.paint(canvas, Offset(-label.width / 2, -label.height / 2));
+        canvas.restore();
+        start += sweep;
+      }
+      // 뽑힌 칸은 빨간 테두리로 강조한다.
+      if (highlight != null) {
+        final from =
+            -pi / 2 +
+            rotation * 2 * pi +
+            weights.take(highlight!).fold(0, (s, w) => s + w) / total * 2 * pi;
+        final sweep = weights[highlight!] / total * 2 * pi;
+        canvas.drawPath(
+          Path()
+            ..moveTo(center.dx, center.dy)
+            ..arcTo(rect.deflate(2.5), from, sweep, false)
+            ..close(),
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 5
+            ..strokeJoin = StrokeJoin.round
+            ..color = toongDanger,
+        );
+      }
+    }
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3
+        ..color = _ink,
+    );
+    canvas.drawCircle(center, 14, Paint()..color = Colors.white);
+    canvas.drawCircle(
+      center,
+      14,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3
+        ..color = _ink,
+    );
+    // 위쪽 화살표.
+    final tip = Offset(center.dx, 16 + 14);
+    canvas.drawPath(
+      Path()
+        ..moveTo(tip.dx, tip.dy)
+        ..lineTo(tip.dx - 12, 0)
+        ..lineTo(tip.dx + 12, 0)
+        ..close(),
+      Paint()..color = toongDanger,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_WheelPainter old) =>
+      old.rotation != rotation ||
+      old.highlight != highlight ||
+      old.textStyle != textStyle ||
+      old.names.join('|') != names.join('|') ||
+      old.weights.join('|') != weights.join('|');
 }
 
 class RemainderPage extends StatefulWidget {
@@ -1988,7 +2323,12 @@ class _RemainderPageState extends State<RemainderPage> {
     room = widget.room;
   }
 
-  Future<void> assign(String expenseId, String itemId, String memberId) async {
+  Future<void> assign(
+    String expenseId,
+    String itemId,
+    String memberId, {
+    Map<String, int>? odds,
+  }) async {
     if (!widget.canEdit) return;
     setState(() => busy = true);
     try {
@@ -2004,7 +2344,7 @@ class _RemainderPageState extends State<RemainderPage> {
                         .map(
                           (item) => item.id != itemId
                               ? item
-                              : item.copyWith(remainderMemberId: memberId),
+                              : item.withRemainder(memberId, odds: odds),
                         )
                         .toList(),
                   ),
@@ -2075,17 +2415,18 @@ class _RemainderPageState extends State<RemainderPage> {
                         onPressed: busy
                             ? null
                             : () async {
-                                final winner = await showDialog<Object?>(
+                                final result = await showDialog<Object?>(
                                   context: context,
                                   barrierDismissible: false,
                                   builder: (_) =>
                                       DrawDialog(room: room, item: entry.item),
                                 );
-                                if (winner is String) {
+                                if (result is DrawResult) {
                                   await assign(
                                     entry.expense.id,
                                     entry.item.id,
-                                    winner,
+                                    result.memberId,
+                                    odds: result.odds,
                                   );
                                 }
                               },
@@ -2283,6 +2624,7 @@ class _SettlementPageState extends State<SettlementPage> {
               style: TextStyle(color: toongSub),
             ),
             const SizedBox(height: 24),
+            _RemainderSummary(room: room),
             ExpansionTile(
               title: const Text('개인별 계산 내역'),
               children: room.members
@@ -2310,6 +2652,42 @@ class _SettlementPageState extends State<SettlementPage> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// 잔돈 부담자 목록. 확률을 직접 정한 추첨이었으면 그 확률을 함께 보여준다.
+class _RemainderSummary extends StatelessWidget {
+  const _RemainderSummary({required this.room});
+  final Room room;
+
+  @override
+  Widget build(BuildContext context) {
+    final items = [
+      for (final e in room.expenses)
+        for (final item in e.items)
+          if (item.remainder > 0 && item.remainderMemberId != null) item,
+    ];
+    if (items.isEmpty) return const SizedBox.shrink();
+    return ExpansionTile(
+      title: const Text('잔돈 부담'),
+      // 확률을 직접 정한 추첨이 있으면 처음부터 펼쳐 둔다.
+      initiallyExpanded: items.any((i) => i.remainderOdds != null),
+      children: [
+        for (final item in items)
+          ListTile(
+            title: Text(
+              '${item.name} 잔돈 ${money(item.remainder)} · '
+              '${room.memberName(item.remainderMemberId!)} 부담',
+            ),
+            subtitle: item.remainderOdds == null
+                ? null
+                : Text(
+                    '확률 직접 정한 추첨 · ${oddsLabel(room, item.remainderOdds!)}',
+                    style: const TextStyle(color: toongDanger),
+                  ),
+          ),
+      ],
     );
   }
 }
