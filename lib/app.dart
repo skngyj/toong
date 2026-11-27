@@ -6,9 +6,11 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
 
+import 'account_ui.dart';
 import 'data/ledger_store.dart';
 import 'data/record_store.dart';
 import 'data/room_store.dart';
+import 'domain/bank.dart';
 import 'domain/draw.dart';
 import 'domain/models.dart';
 import 'domain/receipt.dart';
@@ -416,13 +418,30 @@ class _EntryPageState extends State<EntryPage> {
   late final name = TextEditingController(text: widget.initialCode);
   final nickname = TextEditingController();
   final nicknameFocus = FocusNode();
+  final account = AccountController();
+
+  /// 이 기기에 저장해 둔 내 계좌가 있으면 펼쳐서 보여준다.
+  bool hasSavedAccount = false;
   bool busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    MyAccountStore().load().then((saved) {
+      if (saved == null || !mounted || !account.isEmpty) return;
+      setState(() {
+        account.fill(saved);
+        hasSavedAccount = true;
+      });
+    });
+  }
 
   @override
   void dispose() {
     name.dispose();
     nickname.dispose();
     nicknameFocus.dispose();
+    account.dispose();
     super.dispose();
   }
 
@@ -437,8 +456,33 @@ class _EntryPageState extends State<EntryPage> {
     if (nickname.text.trim().isEmpty) nicknameFocus.requestFocus();
   }
 
+  /// 방에 내 계좌를 등록하고 이 기기에도 저장한다. 실패해도 방에는 들어간다.
+  Future<void> registerAccount(Room room, BankAccount myAccount) async {
+    await MyAccountStore().save(myAccount);
+    try {
+      final me = room.actorMember(await widget.store.actorId());
+      if (me != null) await widget.store.setAccount(room, me.id, myAccount);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('계좌를 등록하지 못했어요. 방의 내 이름을 눌러 다시 등록해주세요.'),
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> submit() async {
     if (!form.currentState!.validate()) return;
+    BankAccount? myAccount;
+    if (!account.isEmpty) {
+      try {
+        myAccount = account.read();
+      } on StateError catch (error) {
+        return showFailure(context, error);
+      }
+    }
     setState(() => busy = true);
     try {
       final room = widget.creating
@@ -450,6 +494,7 @@ class _EntryPageState extends State<EntryPage> {
               name.text.trim().toUpperCase(),
               nickname.text.trim(),
             );
+      if (myAccount != null) await registerAccount(room, myAccount);
       if (!mounted) return;
       Navigator.pushReplacement(
         context,
@@ -508,6 +553,19 @@ class _EntryPageState extends State<EntryPage> {
             ),
             validator: (v) =>
                 (v?.trim().isEmpty ?? true) ? '닉네임을 입력해주세요.' : null,
+          ),
+          ExpansionTile(
+            key: ValueKey(hasSavedAccount),
+            initiallyExpanded: hasSavedAccount,
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: const EdgeInsets.only(bottom: 8),
+            leading: const Icon(Icons.account_balance_outlined),
+            title: const Text('송금받을 내 계좌 (선택)'),
+            subtitle: const Text(
+              '정산할 때 보내는 사람이 바로 복사해요. 방 참여자에게만 보이고 방이 지워지면 함께 지워져요.',
+              style: TextStyle(fontSize: 12),
+            ),
+            children: [AccountFields(controller: account)],
           ),
           const SizedBox(height: 18),
           FilledButton(
@@ -916,6 +974,42 @@ class _RoomPageState extends State<RoomPage> {
     );
   }
 
+  /// 참여자 칩을 누르면 계좌를 보거나 등록한다. 본인 계좌, 방장은 미연결 사람 계좌만 바꿀 수 있다.
+  Future<void> accountOf(Member member) async {
+    final r = room!;
+    final me = r.actorMember(actor ?? '');
+    final current = r.accounts[member.id];
+    final canEdit =
+        me != null &&
+        (me.id == member.id || (r.owns(actor!) && member.actorId == null));
+    if (!canEdit) {
+      final text = current == null
+          ? '${member.name} 님은 아직 계좌를 등록하지 않았어요.'
+          : '${member.name} 님 계좌: ${current.label}';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+      return;
+    }
+    final mine = me.id == member.id;
+    final saved = mine && current == null
+        ? await MyAccountStore().load()
+        : null;
+    if (!mounted) return;
+    final edit = await showAccountDialog(
+      context,
+      title: mine ? '송금받을 내 계좌' : '${member.name} 님 계좌',
+      initial: current ?? saved,
+      help: mine
+          ? '정산 결과에서 나에게 보낼 사람이 이 계좌를 복사해 송금해요. 방 참여자에게만 보여요.'
+          : '앱 없이 추가한 사람의 계좌는 방장이 대신 넣을 수 있어요.',
+    );
+    if (edit == null || !mounted) return;
+    if (mine) await MyAccountStore().save(edit.account);
+    await act(
+      (room) => widget.store.setAccount(room, member.id, edit.account),
+      edit.account == null ? '계좌를 지웠어요.' : '계좌를 등록했어요.',
+    );
+  }
+
   Future<bool> confirm(String title, String body) async =>
       await askConfirm(context, title: Text(title), content: Text(body));
 
@@ -1086,7 +1180,12 @@ class _RoomPageState extends State<RoomPage> {
                   runSpacing: 8,
                   children: [
                     for (final m in r.members)
-                      Chip(
+                      InputChip(
+                        avatar: r.accounts.containsKey(m.id)
+                            ? const Icon(Icons.account_balance, size: 16)
+                            : null,
+                        tooltip: '${m.name} 계좌',
+                        onPressed: () => accountOf(m),
                         label: Text.rich(
                           TextSpan(
                             text:
@@ -1117,6 +1216,17 @@ class _RoomPageState extends State<RoomPage> {
                       ),
                   ],
                 ),
+                if (r.actorMember(actor ?? '') case final me?)
+                  TextButton.icon(
+                    onPressed: () => accountOf(me),
+                    icon: const Icon(Icons.account_balance_outlined),
+                    label: Text(
+                      r.accounts[me.id] == null
+                          ? '송금받을 내 계좌 등록하기'
+                          : '내 계좌 ${r.accounts[me.id]!.bankLabel} ${r.accounts[me.id]!.number}',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                 if (owner && r.members.any((m) => m.actorId == null))
                   TextButton.icon(
                     onPressed: () =>
@@ -2619,19 +2729,58 @@ class SettlementPage extends StatefulWidget {
   State<SettlementPage> createState() => _SettlementPageState();
 }
 
-class _SettlementPageState extends State<SettlementPage> {
+class _SettlementPageState extends State<SettlementPage>
+    with WidgetsBindingObserver {
   late Room room = widget.room;
   String? actor;
   bool busy = false;
 
+  /// 은행 앱을 열어 둔 송금. 퉁으로 돌아오면 송금 완료로 표시할지 묻는다.
+  Transfer? sending;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     widget.store.actorId().then((id) {
       if (mounted) setState(() => actor = id);
     });
     refresh(silent: true);
   }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final t = sending;
+    if (state != AppLifecycleState.resumed || t == null) return;
+    sending = null;
+    final mark = room.paidMark(t.from, t.to);
+    if (mark != null && mark.amount == t.amount) return;
+    toggle(t, false);
+  }
+
+  /// 보내는 사람이 받는 사람 계좌를 복사하고 은행 앱을 연다.
+  Future<void> send(Transfer t) async {
+    final account = room.accounts[t.to];
+    if (account == null) return;
+    final opened = await showSendSheet(
+      context,
+      to: room.memberName(t.to),
+      amount: t.amount,
+      amountText: money(t.amount),
+      account: account,
+    );
+    if (opened) sending = t;
+  }
+
+  /// 내가 보내는 사람이면 true.
+  bool isSender(Transfer t) =>
+      actor != null && room.actorMember(actor!)?.id == t.from;
 
   /// 다른 사람이 표시한 송금 완료를 불러온다.
   Future<void> refresh({bool silent = false}) async {
@@ -2738,11 +2887,12 @@ class _SettlementPageState extends State<SettlementPage> {
                 transfer: transfer,
                 canMark: canMark(transfer) && !busy,
                 onToggle: (paid) => toggle(transfer, paid),
+                onSend: isSender(transfer) ? () => send(transfer) : null,
               ),
             const SizedBox(height: 10),
             const Text(
-              '송금은 사용 중인 은행 앱에서 진행해주세요. 보낸 뒤 체크하면 참여자 모두에게 보여요. '
-              '보내는 사람, 받는 사람, 방장이 체크할 수 있어요.',
+              '내가 보낼 돈은 ‘송금하기’로 계좌를 복사하고 은행 앱을 열 수 있어요. 보낸 뒤 체크하면 '
+              '참여자 모두에게 보여요. 보내는 사람, 받는 사람, 방장이 체크할 수 있어요.',
               style: TextStyle(color: toongSub),
             ),
             const SizedBox(height: 24),
@@ -2821,10 +2971,14 @@ class _TransferCard extends StatelessWidget {
     required this.transfer,
     required this.canMark,
     required this.onToggle,
+    this.onSend,
   });
   final Room room;
   final Transfer transfer;
   final bool canMark;
+
+  /// 내가 보내는 사람일 때만 있다. 받는 사람 계좌로 송금 창을 연다.
+  final VoidCallback? onSend;
 
   /// 지금 완료 상태를 넘긴다(true면 풀기, false면 표시하기).
   final ValueChanged<bool> onToggle;
@@ -2876,6 +3030,26 @@ class _TransferCard extends StatelessWidget {
                       '금액이 바뀌었어요. 전에 ${money(mark.amount)} 송금 완료로 표시됐어요.',
                       style: const TextStyle(fontSize: 13, color: toongDanger),
                     ),
+                  if (onSend != null && !paid)
+                    room.accounts[t.to] == null
+                        ? Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text(
+                              '${room.memberName(t.to)} 님이 계좌를 아직 등록하지 않았어요.',
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: toongSub,
+                              ),
+                            ),
+                          )
+                        : Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: FilledButton.icon(
+                              onPressed: onSend,
+                              icon: const Icon(Icons.send, size: 18),
+                              label: const Text('송금하기'),
+                            ),
+                          ),
                 ],
               ),
             ),

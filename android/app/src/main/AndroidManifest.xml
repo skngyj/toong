@@ -59,5 +59,34 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+        <!-- 송금할 때 여는 은행·송금 앱(lib/domain/bank.dart의 bankApps와 같게 유지). -->
+        <package android:name="com.viva.republica.toss"/>
+        <package android:name="com.kakaobank.channel"/>
+        <package android:name="com.kbankwith.smartbank"/>
+        <package android:name="com.kbstar.kbbank"/>
+        <package android:name="com.shinhan.sbanking"/>
+        <package android:name="com.wooribank.smart.npib"/>
+        <package android:name="com.kebhana.hanapush"/>
+        <package android:name="com.nonghyup.nhallonebank"/>
+        <package android:name="nh.smart.banking"/>
+        <package android:name="com.ibk.android.ionebank"/>
+        <package android:name="com.kakaopay.app"/>
+        <package android:name="com.naverfin.payapp"/>
+        <package android:name="com.scbank.ma30"/>
+        <package android:name="com.smg.spbs"/>
+        <package android:name="kr.co.cu.onbank"/>
+        <package android:name="com.epost.psf.sdsi"/>
+        <package android:name="com.suhyup.pesmb"/>
+        <package android:name="kr.co.busanbank.mbp"/>
+        <package android:name="com.knb.psb"/>
+        <package android:name="kr.co.dgb.dgbm"/>
+        <package android:name="com.kjbank.asb.pbanking"/>
+        <package android:name="com.jbbank.mbanking"/>
+        <package android:name="com.kdb.mobilebank"/>
+        <!-- 은행 앱이 없을 때 Play 스토어를 연다. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="market"/>
+        </intent>
     </queries>
 </manifest>
