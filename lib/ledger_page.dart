@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import 'app.dart';
 import 'data/ledger_store.dart';
+import 'data/subscription_store.dart';
 import 'data/record_store.dart';
 import 'domain/ledger.dart';
 import 'theme.dart';
@@ -59,6 +60,8 @@ class _LedgerPageState extends State<LedgerPage> {
   }
 
   Future<void> load() async {
+    // 결제일이 지난 정기 구독의 내 몫을 먼저 적는다.
+    await SubscriptionStore().importToLedger(ledger: store);
     final list = await store.list();
     final limit = await store.budget();
     if (!mounted) return;

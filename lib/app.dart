@@ -20,6 +20,9 @@ import 'freeze_effect.dart';
 import 'ledger_page.dart';
 import 'qr_page.dart';
 import 'receipt_view.dart';
+import 'reminders.dart';
+import 'subscription_page.dart';
+import 'data/subscription_store.dart';
 import 'theme.dart';
 
 const _ink = toongInk;
@@ -46,16 +49,44 @@ class _ToongAppState extends State<ToongApp> {
 
   RoomStore get store => widget.store;
 
+  StreamSubscription<String>? reminderTap;
+
   @override
   void initState() {
     super.initState();
     subscription = widget.links?.listen(openLink);
+    reminderTap = reminderTaps.stream.listen(openSubscription);
+    refreshSubscriptions();
   }
 
   @override
   void dispose() {
     subscription?.cancel();
+    reminderTap?.cancel();
     super.dispose();
+  }
+
+  /// 정기 구독 결제일 알림을 누르면 그 구독을 연다.
+  Future<void> openSubscription(String id) async {
+    await WidgetsBinding.instance.endOfFrame;
+    navigator.currentState?.push(
+      MaterialPageRoute(builder: (_) => SubscriptionDetailPage(id: id)),
+    );
+  }
+
+  /// 앱을 열 때 정기 구독 알림을 앞으로 몇 달 치 다시 채우고, 지난 결제일을 가계부에 적는다.
+  Future<void> refreshSubscriptions() async {
+    try {
+      final store = SubscriptionStore();
+      final items = await store.list();
+      if (items.isEmpty) return;
+      await store.importToLedger();
+      for (final sub in items) {
+        await reminders.schedule(sub);
+      }
+    } catch (error) {
+      debugPrint('subscriptions: $error');
+    }
   }
 
   /// 방 링크로 들어오면 이미 참여한 방은 바로 열고, 아니면 닉네임만 묻는다.
@@ -382,13 +413,28 @@ class HomePage extends StatelessWidget {
               ),
               child: const Text('참여중인 방 목록'),
             ),
-            TextButton.icon(
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const LedgerPage()),
-              ),
-              icon: const Icon(Icons.account_balance_wallet_outlined),
-              label: const Text('내 가계부'),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                TextButton.icon(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const LedgerPage()),
+                  ),
+                  icon: const Icon(Icons.account_balance_wallet_outlined),
+                  label: const Text('내 가계부'),
+                ),
+                TextButton.icon(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const SubscriptionListPage(),
+                    ),
+                  ),
+                  icon: const Icon(Icons.event_repeat_outlined),
+                  label: const Text('정기 구독'),
+                ),
+              ],
             ),
           ],
         ),
