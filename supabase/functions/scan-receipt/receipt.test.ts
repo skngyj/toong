@@ -65,11 +65,14 @@ test("합계·세금·결제 줄과 잘못된 금액을 거르고 값을 보정�
     total: "21,000원",
   });
   assert.equal(receipt.storeName, "퉁 분식");
-  assert.deepEqual(receipt.items.map((i) => [i.name.length <= 40, i.quantity, i.amount]), [
+  assert.deepEqual(receipt.items.map((i) => [(i.name ?? "").length <= 40, i.quantity, i.amount]), [
     [true, 2, 18000],
     [true, 3, 3000],
+    [true, 1, 500],
     [true, 1, 100],
   ]);
+  // 이름이 가려진 줄은 이름 없이 남는다.
+  assert.equal(receipt.items[2].name, null);
   assert.deepEqual(receipt.discounts, [{ name: "할인", amount: 500 }]);
   assert.equal(receipt.total, 21000);
 });
@@ -79,4 +82,29 @@ test("읽지 못한 값은 null, 빈 응답은 예외", () => {
   assert.deepEqual(receipt, { storeName: null, items: [], discounts: [], total: null });
   assert.throws(() => parseGeminiResponse({ candidates: [] }));
   assert.throws(() => parseGeminiResponse({ candidates: [{ content: { parts: [{ text: "{" }] } }] }));
+});
+
+test("가려진 메뉴 줄은 빈칸으로 남기고, 아무것도 못 읽은 줄은 버린다", () => {
+  const receipt = normalizeReceipt({
+    items: [
+      { name: "떡볶이", quantity: 1, unitPrice: null, amount: null },
+      { name: null, quantity: 2, unitPrice: 3000, amount: null },
+      { name: null, quantity: 1, unitPrice: null, amount: "?" },
+      { name: "소계", quantity: 1, amount: null },
+      { name: "튀김", quantity: 1, unitPrice: null, amount: 4000 },
+    ],
+    discounts: [],
+    total: 20000,
+  });
+  assert.deepEqual(receipt.items, [
+    { name: "떡볶이", quantity: 1, unitPrice: null, amount: null },
+    { name: null, quantity: 2, unitPrice: 3000, amount: 6000 },
+    { name: "튀김", quantity: 1, unitPrice: null, amount: 4000 },
+  ]);
+  const { init } = buildGeminiRequest({
+    apiKey: "key", model: "m", imageBase64: "AAAA", mimeType: "image/jpeg",
+  });
+  const schema = JSON.parse(init.body as string).generationConfig.responseSchema;
+  assert.equal(schema.properties.items.items.properties.name.nullable, true);
+  assert.equal(schema.properties.items.items.properties.amount.nullable, true);
 });
