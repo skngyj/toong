@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'bank.dart';
 import 'draw.dart';
 
 /// 정산을 완료하지 않은 방은 마지막 입력 후 이 시간이 지나면 삭제된다.
@@ -231,6 +232,7 @@ class Room {
     this.frozenAt,
     this.completedAt,
     this.paidTransfers = const [],
+    this.accounts = const {},
   });
   final String id;
   final String code;
@@ -255,6 +257,9 @@ class Room {
 
   /// 송금 완료 표시들. 서버가 관리한다(앱의 저장으로는 바뀌지 않는다).
   final List<PaidTransfer> paidTransfers;
+
+  /// 참여자별 송금받을 계좌(참여자 id → 계좌). 서버가 관리한다(앱의 저장으로는 바뀌지 않는다).
+  final Map<String, BankAccount> accounts;
 
   /// [from]이 [to]에게 보내는 송금의 완료 표시. 없으면 null.
   PaidTransfer? paidMark(String from, String to) {
@@ -325,6 +330,7 @@ class Room {
     bool clearFrozen = false,
     DateTime? completedAt,
     List<PaidTransfer>? paidTransfers,
+    Map<String, BankAccount>? accounts,
   }) => Room(
     id: id,
     code: code,
@@ -339,6 +345,7 @@ class Room {
     frozenAt: clearFrozen ? null : frozenAt ?? this.frozenAt,
     completedAt: completedAt ?? this.completedAt,
     paidTransfers: paidTransfers ?? this.paidTransfers,
+    accounts: accounts ?? this.accounts,
   );
 
   Map<String, dynamic> toJson() => {
@@ -355,6 +362,10 @@ class Room {
     'frozen_at': frozenAt?.toUtc().toIso8601String(),
     'completed_at': completedAt?.toUtc().toIso8601String(),
     'paid_transfers': paidTransfers.map((m) => m.toJson()).toList(),
+    'accounts': {
+      for (final MapEntry(:key, :value) in accounts.entries)
+        key: value.toJson(),
+    },
   };
 
   /// [fallbackActivity]는 이 필드가 생기기 전에 저장된 방에 쓰인다.
@@ -389,6 +400,12 @@ class Room {
       for (final mark in json['paid_transfers'] as List? ?? const [])
         PaidTransfer.fromJson(Map<String, dynamic>.from(mark as Map)),
     ],
+    accounts: {
+      if (json['accounts'] case final Map raw)
+        for (final MapEntry(:key, :value) in raw.entries)
+          if (key is String && BankAccount.fromJson(value) != null)
+            key: BankAccount.fromJson(value)!,
+    },
   );
   static DateTime? _time(Object? value) =>
       value is String ? DateTime.parse(value).toUtc() : null;

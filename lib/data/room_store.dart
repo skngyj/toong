@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../domain/bank.dart';
 import '../domain/models.dart';
 import '../domain/settlement.dart';
 import 'receipt_scanner.dart';
@@ -51,6 +52,10 @@ abstract class RoomStore {
   /// 송금 완료를 표시하거나([paid]가 true) 푼다. 보내는 사람, 받는 사람, 방장만 할 수 있고
   /// 얼린 방·완료된 방에서도 된다. 마지막 입력 시각은 바꾸지 않는다.
   Future<Room> markTransfer(Room room, Transfer transfer, {required bool paid});
+
+  /// 참여자의 송금받을 계좌를 등록·수정한다. [account]가 null이면 지운다.
+  /// 본인 계좌, 또는 방장이 앱 없이 추가한(미연결) 사람의 계좌만 바꿀 수 있다.
+  Future<Room> setAccount(Room room, String memberId, BankAccount? account);
 }
 
 /// 한 방에 있을 수 있는 최대 인원.
@@ -194,6 +199,50 @@ class LocalRoomStore implements RoomStore {
   }
 
   @override
+  Future<Room> setAccount(
+    Room room,
+    String memberId,
+    BankAccount? account,
+  ) async {
+    final rooms = await _all();
+    final index = rooms.indexWhere((r) => r.id == room.id);
+    if (index < 0) throw StateError(roomMissingMessage);
+    final current = _live(rooms[index]);
+    final actor = await actorId();
+    final me = current.actorMember(actor);
+    if (me == null) throw StateError('참여 중인 방만 계좌를 등록할 수 있어요.');
+    final target = current.members.where((m) => m.id == memberId).firstOrNull;
+    if (target == null) throw StateError('방에 없는 참여자예요.');
+    if (me.id != memberId && !(current.owns(actor) && target.actorId == null)) {
+      throw StateError('본인 계좌만 등록할 수 있어요. 앱 없이 추가한 사람은 방장이 넣을 수 있어요.');
+    }
+    final accounts = {...current.accounts};
+    if (account == null) {
+      accounts.remove(memberId);
+    } else {
+      final holder = account.holder.trim();
+      if (!banks.any((b) => b.code == account.bank) ||
+          !isValidAccountNumber(account.number) ||
+          holder.isEmpty ||
+          holder.length > 20) {
+        throw StateError('은행, 계좌번호(숫자 8~20자리), 예금주(20자 이내)를 확인해주세요.');
+      }
+      accounts[memberId] = BankAccount(
+        bank: account.bank,
+        number: account.number.trim(),
+        holder: holder,
+      );
+    }
+    final updated = current.copyWith(
+      accounts: accounts,
+      version: current.version + 1,
+    );
+    rooms[index] = updated;
+    await _write(rooms);
+    return updated;
+  }
+
+  @override
   Future<Room> addMember(Room room, String name) =>
       _ownerUpdate(room, (current, _, _) {
         _editable(current);
@@ -231,6 +280,7 @@ class LocalRoomStore implements RoomStore {
         }
         return current.copyWith(
           members: current.members.where((m) => m.id != memberId).toList(),
+          accounts: {...current.accounts}..remove(memberId),
           lastActivityAt: _now,
         );
       });
@@ -556,6 +606,27 @@ class CloudRoomStore implements RoomStore {
           'p_to': transfer.to,
           'p_amount': transfer.amount,
           'p_paid': paid,
+        },
+      ),
+    );
+  }
+
+  @override
+  Future<Room> setAccount(
+    Room room,
+    String memberId,
+    BankAccount? account,
+  ) async {
+    await _signIn();
+    return _room(
+      await client.rpc(
+        'set_toong_account',
+        params: {
+          'p_room_id': room.id,
+          'p_member_id': memberId,
+          'p_bank': account?.bank,
+          'p_number': account?.number.trim(),
+          'p_holder': account?.holder.trim(),
         },
       ),
     );

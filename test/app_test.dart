@@ -47,6 +47,8 @@ void main() {
       200,
       scrollable: find.byType(Scrollable).first,
     );
+    await tester.ensureVisible(find.text('지출 추가'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('지출 추가'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).at(0), '음식점');
@@ -86,6 +88,8 @@ void main() {
       200,
       scrollable: find.byType(Scrollable).first,
     );
+    await tester.ensureVisible(find.text('지출 추가'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('지출 추가'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).at(0), '음식점');
