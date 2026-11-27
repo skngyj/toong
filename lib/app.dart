@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
 
 import 'account_ui.dart';
 import 'data/ledger_store.dart';
+import 'data/nickname_store.dart';
 import 'data/record_store.dart';
 import 'data/room_store.dart';
 import 'domain/bank.dart';
@@ -114,6 +115,26 @@ class _ToongAppState extends State<ToongApp> {
       return;
     }
     if (!await guestNotice(context)) return;
+    // 저장된 닉네임이 있으면 한 번 묻고 바로 들어간다.
+    final nick = await NicknameStore().load();
+    if (nick != null &&
+        context.mounted &&
+        await askJoinAs(context, code, nick)) {
+      try {
+        final room = await store.joinRoom(code, nick);
+        navigator.currentState?.push(
+          MaterialPageRoute(
+            builder: (_) => RoomPage(store: store, roomId: room.id),
+          ),
+        );
+        return;
+      } catch (error) {
+        final current = navigator.currentContext;
+        if (current != null && current.mounted) {
+          await showFailure(current, error);
+        }
+      }
+    }
     navigator.currentState?.push(
       MaterialPageRoute(
         builder: (_) =>
@@ -334,6 +355,14 @@ Future<void> showFailure(BuildContext context, Object error) async {
   );
 }
 
+/// 저장된 닉네임으로 바로 들어갈지 묻는다.
+Future<bool> askJoinAs(BuildContext context, String code, String nickname) =>
+    askConfirm(
+      context,
+      title: Text('$nickname(으)로 입장할까요?'),
+      content: Text('방 코드 $code에 저장된 닉네임 ‘$nickname’으로 들어가요.'),
+    );
+
 Future<bool> guestNotice(BuildContext context) async => await askConfirm(
   context,
   title: const Text('게스트 이용 안내'),
@@ -342,9 +371,54 @@ Future<bool> guestNotice(BuildContext context) async => await askConfirm(
   ),
 );
 
-class HomePage extends StatelessWidget {
+class HomePage extends StatefulWidget {
   const HomePage({super.key, required this.store});
   final RoomStore store;
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+/// 인사말에 쓰는 시각. 위젯 테스트에서 바꿔 끼운다.
+DateTime Function() homeClock = DateTime.now;
+
+class _HomePageState extends State<HomePage> {
+  RoomStore get store => widget.store;
+  String? nickname;
+
+  @override
+  void initState() {
+    super.initState();
+    loadNickname();
+  }
+
+  Future<void> loadNickname() async {
+    final saved = await NicknameStore().load();
+    if (mounted) setState(() => nickname = saved);
+  }
+
+  /// 다른 화면에서 돌아오면 닉네임이 바뀌었을 수 있어 다시 읽는다.
+  Future<void> push(Widget page) async {
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => page));
+    await loadNickname();
+  }
+
+  Future<void> editNickname() async {
+    final value = await askText(
+      context,
+      title: nickname == null ? '닉네임 정하기' : '닉네임 바꾸기',
+      label: '닉네임',
+      hint: '친구들이 알아볼 이름',
+      initial: nickname ?? '',
+      maxLength: 12,
+      help:
+          '방을 만들거나 들어갈 때 자동으로 채워져요. 이미 들어간 방의 이름은 바뀌지 않아요. '
+          '비우고 확인하면 지워져요.',
+    );
+    if (value == null) return;
+    await NicknameStore().save(value);
+    await loadNickname();
+  }
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -354,6 +428,26 @@ class HomePage extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    greeting(homeClock(), nickname),
+                    key: const Key('home-greeting'),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: toongSub,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: editNickname,
+                  tooltip: nickname == null ? '닉네임 정하기' : '닉네임 바꾸기',
+                  icon: const Icon(Icons.edit_outlined, size: 20),
+                ),
+              ],
+            ),
             const Spacer(flex: 2),
             // 앱 아이콘과 같은 4조각 '퉁' 로고.
             Align(
@@ -380,12 +474,7 @@ class HomePage extends StatelessWidget {
             FilledButton(
               onPressed: () async {
                 if (!await guestNotice(context) || !context.mounted) return;
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => EntryPage(store: store, creating: true),
-                  ),
-                );
+                push(EntryPage(store: store, creating: true));
               },
               child: const Text('새방 만들기'),
             ),
@@ -393,12 +482,7 @@ class HomePage extends StatelessWidget {
             OutlinedButton(
               onPressed: () async {
                 if (!await guestNotice(context) || !context.mounted) return;
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => EntryPage(store: store, creating: false),
-                  ),
-                );
+                push(EntryPage(store: store, creating: false));
               },
               style: OutlinedButton.styleFrom(
                 minimumSize: const Size(double.infinity, 54),
@@ -407,30 +491,19 @@ class HomePage extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             TextButton(
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => RoomListPage(store: store)),
-              ),
+              onPressed: () => push(RoomListPage(store: store)),
               child: const Text('참여중인 방 목록'),
             ),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 TextButton.icon(
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const LedgerPage()),
-                  ),
+                  onPressed: () => push(const LedgerPage()),
                   icon: const Icon(Icons.account_balance_wallet_outlined),
                   label: const Text('내 가계부'),
                 ),
                 TextButton.icon(
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const SubscriptionListPage(),
-                    ),
-                  ),
+                  onPressed: () => push(const SubscriptionListPage()),
                   icon: const Icon(Icons.event_repeat_outlined),
                   label: const Text('정기 구독'),
                 ),
@@ -473,6 +546,11 @@ class _EntryPageState extends State<EntryPage> {
   @override
   void initState() {
     super.initState();
+    NicknameStore().load().then((saved) {
+      if (saved != null && mounted && nickname.text.isEmpty) {
+        setState(() => nickname.text = saved);
+      }
+    });
     MyAccountStore().load().then((saved) {
       if (saved == null || !mounted || !account.isEmpty) return;
       setState(() {
@@ -491,15 +569,20 @@ class _EntryPageState extends State<EntryPage> {
     super.dispose();
   }
 
-  /// 친구 휴대폰의 방 QR을 찍어 방 코드를 채운다. 입장은 닉네임을 넣고 직접 누른다.
+  /// 친구 휴대폰의 방 QR을 찍어 방 코드를 채운다. 닉네임이 있으면 한 번 묻고 바로 입장한다.
   Future<void> scan() async {
     final code = await scanRoomQr(context);
     if (code == null || !mounted) return;
     setState(() => name.text = code);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('QR에서 방 코드 $code를 읽었어요. 닉네임을 넣고 입장하세요.')),
-    );
-    if (nickname.text.trim().isEmpty) nicknameFocus.requestFocus();
+    final nick = nickname.text.trim();
+    if (nick.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('QR에서 방 코드 $code를 읽었어요. 닉네임을 넣고 입장하세요.')),
+      );
+      nicknameFocus.requestFocus();
+      return;
+    }
+    if (await askJoinAs(context, code, nick) && mounted) await submit();
   }
 
   /// 방에 내 계좌를 등록하고 이 기기에도 저장한다. 실패해도 방에는 들어간다.
@@ -541,6 +624,7 @@ class _EntryPageState extends State<EntryPage> {
               nickname.text.trim(),
             );
       if (myAccount != null) await registerAccount(room, myAccount);
+      await NicknameStore().save(nickname.text);
       if (!mounted) return;
       Navigator.pushReplacement(
         context,

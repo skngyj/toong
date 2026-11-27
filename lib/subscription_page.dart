@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'account_ui.dart';
+import 'data/nickname_store.dart';
 import 'data/room_store.dart' show newId;
 import 'data/subscription_store.dart';
 import 'domain/bank.dart';
@@ -142,8 +143,14 @@ class _SubscriptionEditPageState extends State<SubscriptionEditPage> {
   @override
   void initState() {
     super.initState();
-    // 내가 결제하는 사람이면 저장해 둔 내 계좌를 채운다.
+    // 새 구독이면 저장된 닉네임과 내 계좌를 채운다.
     if (s == null) {
+      NicknameStore().load().then((nick) {
+        final me = members.first.name;
+        if (nick != null && mounted && me.text == '나') {
+          setState(() => me.text = nick);
+        }
+      });
       MyAccountStore().load().then((saved) {
         if (saved != null && mounted && account.isEmpty) {
           setState(() => account.fill(saved));
