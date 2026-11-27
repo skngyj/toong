@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
 
 import 'account_ui.dart';
@@ -17,6 +18,7 @@ import 'domain/models.dart';
 import 'domain/receipt.dart';
 import 'domain/record.dart';
 import 'domain/settlement.dart';
+import 'fun.dart';
 import 'freeze_effect.dart';
 import 'ledger_page.dart';
 import 'qr_page.dart';
@@ -386,10 +388,18 @@ class _HomePageState extends State<HomePage> {
   RoomStore get store => widget.store;
   String? nickname;
 
+  /// 앱을 처음 켰을 때만 로고가 모이는 효과를 보여준다.
+  bool intro = false;
+
   @override
   void initState() {
     super.initState();
     loadNickname();
+    SharedPreferences.getInstance().then((prefs) {
+      if (prefs.getBool('toong_intro_seen') ?? false) return;
+      prefs.setBool('toong_intro_seen', true);
+      if (mounted) setState(() => intro = true);
+    });
   }
 
   Future<void> loadNickname() async {
@@ -452,12 +462,7 @@ class _HomePageState extends State<HomePage> {
             // 앱 아이콘과 같은 4조각 '퉁' 로고.
             Align(
               alignment: Alignment.centerLeft,
-              child: Image.asset(
-                'assets/logo.png',
-                width: 64,
-                height: 64,
-                semanticLabel: '퉁 로고',
-              ),
+              child: LogoIntro(key: ValueKey(intro), play: intro),
             ),
             const SizedBox(height: 22),
             const Text(
@@ -471,23 +476,27 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
             const Spacer(flex: 3),
-            FilledButton(
-              onPressed: () async {
-                if (!await guestNotice(context) || !context.mounted) return;
-                push(EntryPage(store: store, creating: true));
-              },
-              child: const Text('새방 만들기'),
+            Pressable(
+              child: FilledButton(
+                onPressed: () async {
+                  if (!await guestNotice(context) || !context.mounted) return;
+                  push(EntryPage(store: store, creating: true));
+                },
+                child: const Text('새방 만들기'),
+              ),
             ),
             const SizedBox(height: 12),
-            OutlinedButton(
-              onPressed: () async {
-                if (!await guestNotice(context) || !context.mounted) return;
-                push(EntryPage(store: store, creating: false));
-              },
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size(double.infinity, 54),
+            Pressable(
+              child: OutlinedButton(
+                onPressed: () async {
+                  if (!await guestNotice(context) || !context.mounted) return;
+                  push(EntryPage(store: store, creating: false));
+                },
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 54),
+                ),
+                child: const Text('방 코드로 입장'),
               ),
-              child: const Text('방 코드로 입장'),
             ),
             const SizedBox(height: 16),
             TextButton(
@@ -797,7 +806,12 @@ class _RoomListPageState extends State<RoomListPage> {
         }
         final (:rooms, :records, :actor) = snapshot.data!;
         if (rooms.isEmpty && records.isEmpty) {
-          return const Center(child: Text('아직 참여한 방이 없어요.'));
+          return const Center(
+            child: EmptyState(
+              message: '아직 참여한 방이 없어요.',
+              hint: '방을 만들거나 방 코드로 들어가 보세요.',
+            ),
+          );
         }
         final now = DateTime.now();
         return ListView(
@@ -973,6 +987,9 @@ class _RoomPageState extends State<RoomPage> {
   Room? room;
   String? actor;
   bool loading = true;
+
+  /// 직전에 보이던 지출 id. 새로 생긴 지출 카드만 떨어지듯 나타나게 한다.
+  Set<String>? seenExpenses;
   Timer? timer;
   Timer? ticker;
 
@@ -1007,6 +1024,7 @@ class _RoomPageState extends State<RoomPage> {
       final alert = await keepCompleted(widget.store, current);
       if (mounted) {
         setState(() {
+          seenExpenses = (room ?? current).expenses.map((e) => e.id).toSet();
           room = current;
           actor = id;
           loading = false;
@@ -1372,8 +1390,9 @@ class _RoomPageState extends State<RoomPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text('함께 쓴 금액'),
-                        Text(
-                          money(r.total),
+                        RollingNumber(
+                          value: r.total,
+                          format: money,
                           style: const TextStyle(
                             fontSize: 30,
                             fontWeight: FontWeight.bold,
@@ -1390,40 +1409,49 @@ class _RoomPageState extends State<RoomPage> {
                 ),
                 const SizedBox(height: 8),
                 if (r.expenses.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 48),
-                    child: Center(child: Text('아직 등록된 지출이 없어요.')),
+                  const EmptyState(
+                    message: '아직 등록된 지출이 없어요.',
+                    hint: '영수증을 찍거나 직접 입력해 보세요.',
                   ),
                 for (final expense in r.expenses)
-                  Card(
-                    child: ListTile(
-                      title: Text(expense.title),
-                      subtitle: Text(
-                        '${r.memberName(expense.payerId)} 결제 · ${expense.items.length}개 항목',
+                  DropIn(
+                    key: ValueKey('drop-${expense.id}'),
+                    animate:
+                        seenExpenses != null &&
+                        !seenExpenses!.contains(expense.id),
+                    child: Card(
+                      child: ListTile(
+                        title: Text(expense.title),
+                        subtitle: Text(
+                          '${r.memberName(expense.payerId)} 결제 · ${expense.items.length}개 항목',
+                        ),
+                        trailing: Text(
+                          money(expense.total),
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        onTap: owner
+                            ? () => open(
+                                ExpensePage(
+                                  store: widget.store,
+                                  room: r,
+                                  original: expense,
+                                ),
+                              )
+                            : null,
                       ),
-                      trailing: Text(
-                        money(expense.total),
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      onTap: owner
-                          ? () => open(
-                              ExpensePage(
-                                store: widget.store,
-                                room: r,
-                                original: expense,
-                              ),
-                            )
-                          : null,
                     ),
                   ),
                 const SizedBox(height: 12),
                 if (owner)
-                  OutlinedButton.icon(
-                    onPressed: () =>
-                        open(ExpensePage(store: widget.store, room: r)),
-                    icon: const Icon(Icons.add),
-                    label: const Text('지출 추가'),
+                  Pressable(
+                    child: OutlinedButton.icon(
+                      onPressed: () =>
+                          open(ExpensePage(store: widget.store, room: r)),
+                      icon: const Icon(Icons.add),
+                      label: const Text('지출 추가'),
+                    ),
                   ),
+
                 if (!isOwner && !expired && !r.isFrozen && !r.isCompleted)
                   const Text('지출과 잔돈 부담자는 방장이 입력할 수 있어요.'),
                 const SizedBox(height: 20),
@@ -2868,6 +2896,15 @@ class _SettlementPageState extends State<SettlementPage>
   /// 은행 앱을 열어 둔 송금. 퉁으로 돌아오면 송금 완료로 표시할지 묻는다.
   Transfer? sending;
 
+  /// 마지막 송금까지 체크되면 늘어난다. 늘어날 때 "정산 끝!" 종이 조각이 터진다.
+  int celebrate = 0;
+
+  bool allPaid(Room r) {
+    final transfers = calculateSettlement(r).transfers;
+    return transfers.isNotEmpty &&
+        transfers.every((t) => r.isPaid(t.from, t.to, t.amount));
+  }
+
   @override
   void initState() {
     super.initState();
@@ -2947,7 +2984,12 @@ class _SettlementPageState extends State<SettlementPage>
       final updated = await widget.store.markTransfer(room, t, paid: !paid);
       // 완료된 방이면 기기에 저장된 정산 기록도 새 표시로 바꾼다.
       await RecordStore().replace(updated);
-      if (mounted) setState(() => room = updated);
+      if (mounted) {
+        setState(() {
+          if (!allPaid(room) && allPaid(updated)) celebrate++;
+          room = updated;
+        });
+      }
     } catch (error) {
       if (mounted) await showFailure(context, error);
     } finally {
@@ -2983,26 +3025,64 @@ class _SettlementPageState extends State<SettlementPage>
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 30),
           children: [
-            const Text(
-              '이렇게 보내면\n정산 끝.',
-              style: TextStyle(
-                fontSize: 30,
-                fontWeight: FontWeight.bold,
-                height: 1.3,
+            ConfettiBurst(
+              burst: celebrate,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    '이렇게 보내면\n정산 끝.',
+                    style: TextStyle(
+                      fontSize: 30,
+                      fontWeight: FontWeight.bold,
+                      height: 1.3,
+                    ),
+                  ),
+                  if (result.transfers.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      done == result.transfers.length
+                          ? '모든 송금이 끝났어요.'
+                          : '송금 ${result.transfers.length}건 중 $done건 완료',
+                      style: const TextStyle(
+                        color: toongSub,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                  // 모든 송금이 체크되면 "정산 끝!" 띠가 내려온다.
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 320),
+                    curve: Curves.easeOutBack,
+                    child:
+                        done == result.transfers.length &&
+                            result.transfers.isNotEmpty
+                        ? Container(
+                            margin: const EdgeInsets.only(top: 12),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
+                            decoration: BoxDecoration(
+                              color: _ink,
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: const Text(
+                              '정산 끝! 모두 퉁 쳤어요 🎉',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 16,
+                              ),
+                            ),
+                          )
+                        : const SizedBox(width: double.infinity),
+                  ),
+                  const SizedBox(height: 8),
+                ],
               ),
             ),
-            if (result.transfers.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Text(
-                done == result.transfers.length
-                    ? '모든 송금이 끝났어요.'
-                    : '송금 ${result.transfers.length}건 중 $done건 완료',
-                style: const TextStyle(
-                  color: toongSub,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
             const SizedBox(height: 20),
             if (result.transfers.isEmpty)
               const Card(
@@ -3141,8 +3221,9 @@ class _TransferCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 6),
-                  Text(
-                    money(t.amount),
+                  RollingNumber(
+                    value: t.amount,
+                    format: money,
                     style: TextStyle(
                       fontSize: 28,
                       fontWeight: FontWeight.bold,
@@ -3174,10 +3255,12 @@ class _TransferCard extends StatelessWidget {
                           )
                         : Padding(
                             padding: const EdgeInsets.only(top: 8),
-                            child: FilledButton.icon(
-                              onPressed: onSend,
-                              icon: const Icon(Icons.send, size: 18),
-                              label: const Text('송금하기'),
+                            child: Pressable(
+                              child: FilledButton.icon(
+                                onPressed: onSend,
+                                icon: const Icon(Icons.send, size: 18),
+                                label: const Text('송금하기'),
+                              ),
                             ),
                           ),
                 ],
@@ -3189,22 +3272,29 @@ class _TransferCard extends StatelessWidget {
                 customBorder: const CircleBorder(),
                 onTap: canMark ? () => onToggle(paid) : null,
                 child: Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: paid ? _ink : Colors.transparent,
-                      border: Border.all(
-                        color: canMark || paid ? _ink : toongLine,
-                        width: 2,
-                      ),
+                  padding: const EdgeInsets.all(4),
+                  // 송금 완료면 빨간 "송금완료" 도장이 찍힌다. 아니면 빈 동그라미.
+                  child: SizedBox(
+                    width: 56,
+                    height: 56,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        if (!paid)
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: canMark ? _ink : toongLine,
+                                width: 2,
+                              ),
+                            ),
+                          ),
+                        PaidStamp(paid: paid, size: 54),
+                      ],
                     ),
-                    child: paid
-                        ? const Icon(Icons.check, color: Colors.white, size: 24)
-                        : null,
                   ),
                 ),
               ),

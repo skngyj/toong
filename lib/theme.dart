@@ -1,4 +1,7 @@
+import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
+
+import 'fun.dart';
 
 /// 앱 색. 앱 아이콘(검정 바탕 위 흰 영수증, 검정 글씨)과 같은 흑백 계열이다.
 const toongInk = Color(0xFF111111);
@@ -72,6 +75,13 @@ ThemeData toongTheme() => ThemeData(
   floatingActionButtonTheme: const FloatingActionButtonThemeData(
     backgroundColor: toongInk,
     foregroundColor: Colors.white,
+  ),
+  // 화면 전환: 오른쪽에서 살짝 밀려오며 나타난다. iOS는 밀어서 뒤로 가기를 그대로 쓴다.
+  pageTransitionsTheme: const PageTransitionsTheme(
+    builders: {
+      TargetPlatform.android: SoftSlideTransitions(),
+      TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+    },
   ),
   progressIndicatorTheme: const ProgressIndicatorThemeData(
     color: toongInk,

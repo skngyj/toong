@@ -7,6 +7,7 @@ import 'data/room_store.dart' show newId;
 import 'data/subscription_store.dart';
 import 'domain/bank.dart';
 import 'domain/subscription.dart';
+import 'fun.dart';
 import 'reminders.dart';
 import 'theme.dart';
 
@@ -60,11 +61,9 @@ class _SubscriptionListPageState extends State<SubscriptionListPage> {
             ),
             const SizedBox(height: 16),
             if (items.isEmpty)
-              const Card(
-                child: Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Text('아직 등록한 구독이 없어요.'),
-                ),
+              const EmptyState(
+                message: '아직 등록한 구독이 없어요.',
+                hint: '넷플릭스·유튜브처럼 나눠 내는 구독을 추가해 보세요.',
               ),
             for (final s in items)
               Card(
