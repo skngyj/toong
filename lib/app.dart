@@ -1394,6 +1394,9 @@ class _ItemDraft {
     required int amount,
     required this.memberIds,
     this.remainderMemberId,
+    this.nameHidden = false,
+    this.amountHidden = false,
+    this.amountGuessed = false,
   }) : name = TextEditingController(text: name),
        amount = TextEditingController(text: amount == 0 ? '' : '$amount');
   final String id;
@@ -1401,6 +1404,15 @@ class _ItemDraft {
   final TextEditingController amount;
   final Set<String> memberIds;
   String? remainderMemberId;
+
+  /// 영수증에서 이름이 가려져 "메뉴 1"처럼 임시 이름을 붙였으면 true. 고치면 false.
+  bool nameHidden;
+
+  /// 영수증에서 금액이 가려져 비워 뒀으면 true. 입력하면 false.
+  bool amountHidden;
+
+  /// 영수증 총액으로 계산해 채운 금액이면 true. 고치면 false.
+  bool amountGuessed;
 
   void dispose() {
     name.dispose();
@@ -1464,13 +1476,13 @@ class _ExpensePageState extends State<ExpensePage> {
   }
 
   /// 영수증 사진을 읽어 항목을 채운다. 이미 입력한 항목이 있으면 바꿀지 먼저 묻는다.
-  Future<void> scan(ImageSource source) async {
+  Future<void> scan(ImageSource source, {bool askReplace = true}) async {
     final scanner = widget.store.receiptScanner;
     if (scanner == null || scanning) return;
     final hasInput = items.any(
       (d) => d.name.text.trim().isNotEmpty || d.amount.text.trim().isNotEmpty,
     );
-    if (hasInput) {
+    if (hasInput && askReplace) {
       final replace = await askConfirm(
         context,
         title: const Text('입력한 항목을 바꿀까요?'),
@@ -1482,8 +1494,25 @@ class _ExpensePageState extends State<ExpensePage> {
     if (photo == null || !mounted) return;
     setState(() => scanning = true);
     try {
-      final receipt = await scanner.scan(photo.bytes, mimeType: photo.mimeType);
+      final receipt = (await scanner.scan(
+        photo.bytes,
+        mimeType: photo.mimeType,
+      )).withGuessedAmount();
       if (!mounted) return;
+      if (receipt.items.isEmpty) {
+        // 하나도 못 읽었으면 입력한 항목은 그대로 두고 다시 찍기를 권한다.
+        setState(() => scanning = false);
+        final retake = await askConfirm(
+          context,
+          title: const Text('메뉴를 읽지 못했어요'),
+          content: const Text(
+            '가려진 부분 없이, 영수증이 화면에 꽉 차게 다시 찍어주세요. '
+            '취소하면 직접 입력할 수 있어요.',
+          ),
+        );
+        if (retake && mounted) await scan(source, askReplace: false);
+        return;
+      }
       setState(() {
         for (final draft in items) {
           draft.dispose();
@@ -1495,8 +1524,11 @@ class _ExpensePageState extends State<ExpensePage> {
               (line) => _ItemDraft(
                 id: newId(),
                 name: line.name,
-                amount: line.amount,
+                amount: line.amount ?? 0,
                 memberIds: {},
+                nameHidden: line.nameHidden,
+                amountHidden: line.amountHidden,
+                amountGuessed: line.amountGuessed,
               ),
             ),
           );
@@ -1627,6 +1659,23 @@ class _ExpensePageState extends State<ExpensePage> {
             _ScanSummary(
               receipt: scanned!,
               currentTotal: draftTotal,
+              hiddenLeft: items.fold(
+                0,
+                (sum, d) =>
+                    sum + (d.nameHidden ? 1 : 0) + (d.amountHidden ? 1 : 0),
+              ),
+              amountsMissing: items.any((d) => d.amountHidden),
+              onAddGap: (gap) => setState(
+                () => items.add(
+                  _ItemDraft(
+                    id: newId(),
+                    name: '확인 필요 메뉴',
+                    amount: gap,
+                    memberIds: {},
+                    nameHidden: true,
+                  ),
+                ),
+              ),
               onSelectAll: () => setState(() {
                 for (final draft in items) {
                   draft.memberIds
@@ -1707,21 +1756,39 @@ class _ExpensePageState extends State<ExpensePage> {
             const SizedBox(height: 8),
             TextField(
               controller: item.name,
-              decoration: const InputDecoration(
-                labelText: '메뉴 또는 이용 내역',
-                hintText: '예: 치킨',
+              onChanged: (_) {
+                if (item.nameHidden) setState(() => item.nameHidden = false);
+              },
+              decoration: _flagged(
+                const InputDecoration(
+                  labelText: '메뉴 또는 이용 내역',
+                  hintText: '예: 치킨',
+                ),
+                item.nameHidden ? '영수증에서 이름이 가려져 있어요. 알아보면 고쳐주세요.' : null,
+                toongDanger,
               ),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: item.amount,
               // 영수증 총액과의 차이 표시를 바로 갱신한다.
-              onChanged: (_) => setState(() {}),
+              onChanged: (_) => setState(() {
+                item.amountHidden = false;
+                item.amountGuessed = false;
+              }),
               keyboardType: TextInputType.number,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: const InputDecoration(
-                labelText: '항목 총액 (원)',
-                hintText: '24000',
+              decoration: _flagged(
+                const InputDecoration(
+                  labelText: '항목 총액 (원)',
+                  hintText: '24000',
+                ),
+                item.amountHidden
+                    ? '영수증에서 금액이 가려져 있어요. 직접 입력해주세요.'
+                    : item.amountGuessed
+                    ? '가려진 금액을 영수증 총액으로 계산했어요. 확인해주세요.'
+                    : null,
+                item.amountHidden ? toongDanger : _orange,
               ),
             ),
             const SizedBox(height: 16),
@@ -1754,14 +1821,47 @@ class _ExpensePageState extends State<ExpensePage> {
   }
 }
 
+/// 가려진 칸 안내 색(합계로 계산한 금액).
+const _orange = Color(0xFFD9822B);
+
+/// [message]가 있으면 테두리와 안내 글씨를 [color]로 칠한다.
+InputDecoration _flagged(InputDecoration base, String? message, Color color) {
+  if (message == null) return base;
+  final border = OutlineInputBorder(
+    borderRadius: BorderRadius.circular(16),
+    borderSide: BorderSide(color: color, width: 1.6),
+  );
+  return base.copyWith(
+    helperText: message,
+    helperMaxLines: 2,
+    helperStyle: TextStyle(color: color, fontWeight: FontWeight.w600),
+    enabledBorder: border,
+    focusedBorder: border.copyWith(
+      borderSide: BorderSide(color: color, width: 2.2),
+    ),
+  );
+}
+
 /// 영수증 인식 결과 요약: 읽은 메뉴 수, 반영한 할인, 영수증 총액과의 차이.
 class _ScanSummary extends StatelessWidget {
   const _ScanSummary({
     required this.receipt,
     required this.currentTotal,
+    required this.hiddenLeft,
+    required this.amountsMissing,
+    required this.onAddGap,
     required this.onSelectAll,
   });
   final ScannedReceipt receipt;
+
+  /// 아직 고치지 않은 가려진 칸 수.
+  final int hiddenLeft;
+
+  /// 금액이 가려져 빈 칸이 남아 있으면 true. 차액 비교는 그 칸을 채운 뒤에 한다.
+  final bool amountsMissing;
+
+  /// 영수증 총액과의 차액만큼 "확인 필요 메뉴"를 더한다.
+  final ValueChanged<int> onAddGap;
 
   /// 지금 입력된 항목 금액의 합. 사용자가 고치면 바뀐다.
   final int currentTotal;
@@ -1778,7 +1878,8 @@ class _ScanSummary extends StatelessWidget {
       0 => (false, '항목 합계가 영수증 총액 ${money(total!)}과 같아요.'),
       > 0 => (
         true,
-        '항목 합계가 영수증 총액 ${money(total!)}보다 ${money(gap)} 적어요. 빠진 메뉴가 없는지 확인해주세요.',
+        '항목 합계가 영수증 총액 ${money(total!)}보다 ${money(gap)} 적어요. '
+            '가려져서 빠진 메뉴가 있을 수 있어요.',
       ),
       _ => (
         true,
@@ -1802,7 +1903,28 @@ class _ScanSummary extends StatelessWidget {
               Text('할인 ${money(discount)}($names)을 메뉴 금액에 비율대로 나눠 반영했어요.'),
             if (discount > 0 && discount >= receipt.itemsTotal)
               Text('할인 ${money(discount)}이 메뉴 합보다 커서 반영하지 않았어요.'),
-            Text(check),
+            if (hiddenLeft > 0)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Text(
+                  '가려져 읽지 못한 칸 $hiddenLeft개가 있어요. 빨간 칸을 확인해주세요.',
+                  style: const TextStyle(
+                    color: toongDanger,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            Text(
+              amountsMissing && gap != null && gap > 0
+                  ? '가려진 금액 칸을 채운 뒤 영수증 총액 ${money(total!)}과 다시 비교해요.'
+                  : check,
+            ),
+            if (gap != null && gap > 0 && !amountsMissing)
+              TextButton.icon(
+                onPressed: () => onAddGap(gap),
+                icon: const Icon(Icons.playlist_add),
+                label: Text('차액 ${money(gap)}을 항목으로 추가'),
+              ),
             const SizedBox(height: 4),
             const Text(
               '인식 결과가 틀릴 수 있어요. 항목을 확인하고 먹은 사람을 골라주세요.',

@@ -20,10 +20,12 @@ const MAX_ITEMS = 100;
 const MAX_AMOUNT = 100_000_000;
 
 export interface ReceiptItem {
-  name: string;
+  /** 가려지거나 흐려 이름을 못 읽었으면 null. */
+  name: string | null;
   quantity: number;
   unitPrice: number | null;
-  amount: number;
+  /** 가려지거나 흐려 금액을 못 읽었으면 null. */
+  amount: number | null;
 }
 
 export interface ReceiptDiscount {
@@ -45,6 +47,7 @@ const PROMPT = [
   "3) 할인·쿠폰·포인트 사용 줄은 discounts에 넣고 amount는 양수로 적습니다.",
   "4) 금액은 쉼표 없는 원 단위 정수입니다. total은 영수증에 적힌 최종 결제 금액입니다.",
   "5) 읽을 수 없는 값은 지어내지 말고 null로 둡니다. 영수증이 아니면 items를 빈 배열로 둡니다.",
+  "6) 손가락·접힘·얼룩·빛 반사로 가려지거나 흐린 메뉴 줄도 빼지 말고 넣습니다. 이름을 못 읽으면 name을 null, 금액을 못 읽으면 amount와 unitPrice를 null로 둡니다. 일부 글자만 보여도 추측해 채우지 말고 null로 둡니다.",
 ].join(" ");
 
 const RESPONSE_SCHEMA = {
@@ -56,10 +59,10 @@ const RESPONSE_SCHEMA = {
       items: {
         type: "OBJECT",
         properties: {
-          name: { type: "STRING" },
+          name: { type: "STRING", nullable: true },
           quantity: { type: "INTEGER" },
           unitPrice: { type: "INTEGER", nullable: true },
-          amount: { type: "INTEGER" },
+          amount: { type: "INTEGER", nullable: true },
         },
         required: ["name", "quantity", "amount"],
       },
@@ -153,18 +156,21 @@ export function normalizeReceipt(raw: unknown): ScannedReceipt {
   for (const entry of Array.isArray(data.items) ? data.items : []) {
     const row = (entry ?? {}) as Record<string, unknown>;
     const name = cleanName(row.name);
-    if (!name || NOT_A_MENU.test(name)) continue;
+    if (name && NOT_A_MENU.test(name)) continue;
     const quantity = Math.max(1, toInt(row.quantity) ?? 1);
     const unitPrice = toInt(row.unitPrice);
     let amount = toInt(row.amount);
     if ((amount === null || amount <= 0) && unitPrice !== null && unitPrice > 0) {
       amount = unitPrice * quantity;
     }
-    if (amount === null || amount < 1 || amount > MAX_AMOUNT) continue;
+    // 금액이 0 이하로 적힌 줄(서비스 등)과 너무 큰 금액은 메뉴가 아니다.
+    if (amount !== null && (amount < 1 || amount > MAX_AMOUNT)) continue;
+    // 이름과 금액을 모두 못 읽은 줄은 쓸 수 있는 정보가 없다.
+    if (!name && amount === null) continue;
     items.push({
-      name,
+      name: name || null,
       quantity,
-      unitPrice: unitPrice !== null && unitPrice > 0 ? unitPrice : null,
+      unitPrice: amount !== null && unitPrice !== null && unitPrice > 0 ? unitPrice : null,
       amount,
     });
     if (items.length === MAX_ITEMS) break;

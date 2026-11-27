@@ -91,11 +91,8 @@ Deno.serve(async (req) => {
       console.error("gemini", response.status, (await response.text()).slice(0, 500));
       return json({ error: FAILED }, 502);
     }
-    const receipt = parseGeminiResponse(await response.json());
-    if (receipt.items.length === 0) {
-      return json({ error: "영수증에서 메뉴를 찾지 못했어요. 직접 입력해주세요." }, 422);
-    }
-    return json(receipt);
+    // 메뉴를 하나도 못 읽었어도 빈 결과를 돌려준다. 앱이 다시 찍기를 권한다.
+    return json(parseGeminiResponse(await response.json()));
   } catch (error) {
     console.error("scan", error);
     return json({ error: FAILED }, 502);
