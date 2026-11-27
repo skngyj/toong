@@ -309,6 +309,13 @@ class ReceiptContent extends StatelessWidget {
             '결제 ${room.memberName(e.payerId)} · ${e.items.length}개 항목',
             style: const TextStyle(fontSize: 11.5, color: toongSub),
           ),
+          for (final item in e.items)
+            if (item.remainderOdds != null)
+              Text(
+                '*${item.name} 잔돈 ${room.memberName(item.remainderMemberId!)} · '
+                '확률 지정 추첨(${oddsLabel(room, item.remainderOdds!)})',
+                style: const TextStyle(fontSize: 11.5, color: toongSub),
+              ),
         ],
         const ReceiptDivider(),
         const Text('개인별', style: TextStyle(fontWeight: FontWeight.w700)),

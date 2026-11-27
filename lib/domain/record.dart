@@ -44,6 +44,7 @@ String buildRecordText(Room room) {
       final remainder = item.remainder > 0
           ? ' · 잔돈 ${_won(item.remainder)}원 '
                 '${room.memberName(item.remainderMemberId!)} 부담'
+                '${item.remainderOdds == null ? '' : ' (확률 직접 정한 추첨: ${oddsLabel(room, item.remainderOdds!)})'}'
           : '';
       lines.add('   - ${item.name} ${_won(item.amount)}원 · $share$remainder');
     }

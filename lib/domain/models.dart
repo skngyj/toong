@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'draw.dart';
+
 /// 정산을 완료하지 않은 방은 마지막 입력 후 이 시간이 지나면 삭제된다.
 const roomInactiveLimit = Duration(hours: 48);
 
@@ -76,12 +78,27 @@ class LineItem {
     required this.amount,
     required this.memberIds,
     this.remainderMemberId,
+    this.remainderOdds,
   });
   final String id;
   final String name;
   final int amount;
   final List<String> memberIds;
   final String? remainderMemberId;
+
+  /// 확률을 직접 정해 잔돈을 추첨했을 때 후보별 비율. 같은 확률 추첨이나 직접 고른 경우는 null.
+  /// 모두에게 같은 추첨 조건이 보이도록 방에 함께 저장한다.
+  final Map<String, int>? remainderOdds;
+
+  /// 잔돈 부담자를 정한다. [odds]는 확률을 직접 정한 추첨일 때만 넘긴다.
+  LineItem withRemainder(String memberId, {Map<String, int>? odds}) => LineItem(
+    id: id,
+    name: name,
+    amount: amount,
+    memberIds: memberIds,
+    remainderMemberId: memberId,
+    remainderOdds: odds,
+  );
 
   int get remainder => memberIds.isEmpty ? 0 : amount % memberIds.length;
   bool get needsRemainder => remainder > 0 && remainderMemberId == null;
@@ -100,6 +117,9 @@ class LineItem {
     remainderMemberId: clearRemainder
         ? null
         : remainderMemberId ?? this.remainderMemberId,
+    remainderOdds: clearRemainder || remainderMemberId != null
+        ? null
+        : remainderOdds,
   );
 
   Map<String, dynamic> toJson() => {
@@ -108,6 +128,7 @@ class LineItem {
     'amount': amount,
     'member_ids': memberIds,
     'remainder_member_id': remainderMemberId,
+    if (remainderOdds != null) 'remainder_odds': remainderOdds,
   };
   factory LineItem.fromJson(Map<String, dynamic> json) => LineItem(
     id: json['id'] as String,
@@ -115,7 +136,19 @@ class LineItem {
     amount: (json['amount'] as num).toInt(),
     memberIds: List<String>.from(json['member_ids'] as List),
     remainderMemberId: json['remainder_member_id'] as String?,
+    remainderOdds: _odds(json['remainder_odds']),
   );
+
+  /// 저장된 비율을 읽는다. 모양이 이상하면 없는 것으로 본다.
+  static Map<String, int>? _odds(Object? raw) {
+    if (raw is! Map) return null;
+    final odds = <String, int>{};
+    for (final MapEntry(:key, :value) in raw.entries) {
+      if (key is! String || value is! num || value < 1) return null;
+      odds[key] = value.toInt();
+    }
+    return odds.isEmpty ? null : odds;
+  }
 }
 
 class Expense {
@@ -365,4 +398,13 @@ class Room {
         fallbackActivity: fallbackActivity,
       );
   String encode() => jsonEncode(toJson());
+}
+
+/// 확률을 직접 정한 잔돈 추첨의 조건을 "민수 25% · 지수 75%"처럼 보여준다.
+String oddsLabel(Room room, Map<String, int> odds) {
+  final ids = odds.keys.toList();
+  final percents = weightPercents([for (final id in ids) odds[id]!]);
+  return [
+    for (final (i, id) in ids.indexed) '${room.memberName(id)} ${percents[i]}%',
+  ].join(' · ');
 }
