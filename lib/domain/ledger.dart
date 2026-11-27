@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'models.dart';
 
 /// 가계부 기본 분류.
-const ledgerCategories = ['식비', '카페', '술자리', '놀거리', '교통', '쇼핑', '기타'];
+const ledgerCategories = ['식비', '카페', '술자리', '놀거리', '교통', '쇼핑', '구독', '기타'];
 
 /// 지출 제목에서 분류를 추정한다. 맞는 말이 없으면 기타. 사용자가 나중에 바꿀 수 있다.
 String guessCategory(String title) {

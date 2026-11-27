@@ -41,6 +41,8 @@ dependencies:
   gal: ^3.0.1
   qr_flutter: ^4.1.0
   mobile_scanner: ^7.5.0
+  flutter_local_notifications: ^23.0.4
+  timezone: ^0.11.2
 dev_dependencies:
   flutter_test:
     sdk: flutter
