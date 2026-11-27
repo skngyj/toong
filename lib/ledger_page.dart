@@ -6,6 +6,7 @@ import 'data/ledger_store.dart';
 import 'data/subscription_store.dart';
 import 'data/record_store.dart';
 import 'domain/ledger.dart';
+import 'fun.dart';
 import 'theme.dart';
 import 'data/room_store.dart' show newId;
 
@@ -197,13 +198,9 @@ class _LedgerPageState extends State<LedgerPage> {
                 const Text('기록', style: TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 4),
                 if (monthly.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 24),
-                    child: Text(
-                      '이 달의 기록이 없어요.\n정산을 완료하면 내 부담액이 자동으로 기록돼요.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: toongSub),
-                    ),
+                  const EmptyState(
+                    message: '이 달의 기록이 없어요.',
+                    hint: '정산을 완료하면 내 부담액이 자동으로 기록돼요.',
                   ),
                 for (final e in monthly)
                   Card(
@@ -259,8 +256,9 @@ class _SummaryCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text('쓴 돈', style: TextStyle(color: toongSub)),
-            Text(
-              money(spent),
+            RollingNumber(
+              value: spent,
+              format: money,
               style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 10),

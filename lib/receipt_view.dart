@@ -8,6 +8,7 @@ import 'package:gal/gal.dart';
 
 import 'domain/models.dart';
 import 'domain/settlement.dart';
+import 'fun.dart';
 import 'theme.dart';
 
 /// 영수증 글꼴. 나눔고딕코딩(고정폭)이라 금액 자리가 줄 맞춰 보인다.
@@ -579,7 +580,14 @@ class _PrintReceiptPageState extends State<PrintReceiptPage>
                       padding: const EdgeInsets.fromLTRB(32, 58, 32, 24),
                       child: Column(
                         children: [
-                          CapturableReceipt(key: receipt, child: paper),
+                          ConfettiBurst(
+                            burst: 1,
+                            count: 36,
+                            child: CapturableReceipt(
+                              key: receipt,
+                              child: paper,
+                            ),
+                          ),
                           const SizedBox(height: 14),
                           const Text(
                             '정산 기록과 내 부담액(가계부)을 이 기기에 저장했어요.',
